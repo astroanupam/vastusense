@@ -1,0 +1,62 @@
+/* Two themes: light (sandstone) and dark (midnight). Sizes in rem so the A-/A+ control scales everything. */
+:root,[data-theme=light]{--bg:#f6f3ec;--card:#fff;--ink:#2b2a27;--mut:#77726a;--acc:#9a4b1c;--line:#ddd5c6;--ok:#2d7a4b;--hdr:#9a4b1c}
+[data-theme=dark]{--bg:#14171c;--card:#1e232b;--ink:#e8ecf2;--mut:#98a2b3;--acc:#4fc3c9;--line:#323a46;--ok:#6fd49a;--hdr:#0f3b40}
+*{box-sizing:border-box}
+html{font-size:16px}
+body{margin:0;font:1rem/1.45 system-ui,"Segoe UI","Noto Sans Devanagari","Noto Naskh Arabic",sans-serif;background:var(--bg);color:var(--ink)}
+.top{display:flex;align-items:center;gap:1rem;background:var(--hdr);color:#fff;padding:0 .9rem;position:sticky;top:0;z-index:5}
+.brand{font-weight:700;font-size:1.2rem;white-space:nowrap}
+#menu{display:flex;overflow-x:auto;gap:2px;flex:1}
+#menu button{background:none;border:0;color:#fff;padding:.8rem .7rem;cursor:pointer;white-space:nowrap;font:inherit;opacity:.85;border-bottom:3px solid transparent}
+#menu button.on{opacity:1;border-color:#fff;font-weight:600}
+.ctl{display:flex;gap:.3rem;align-items:center}
+.ctl select{font:inherit;font-size:.85rem;padding:.3rem;border-radius:6px;border:0;background:#fff3;color:#fff}
+.ctl select option{color:#000}
+.ic{background:#fff3;color:#fff;border:0;border-radius:6px;padding:.3rem .55rem;cursor:pointer;font:inherit;font-size:.85rem}
+.layout{display:grid;grid-template-columns:12rem 21rem 1fr;gap:.8rem;padding:.8rem;align-items:start}
+#sub{display:flex;flex-direction:column;gap:2px}
+#sub button{text-align:start;background:none;border:0;padding:.5rem .6rem;border-radius:6px;cursor:pointer;color:var(--ink);font:inherit}
+#sub button:hover{background:var(--card)}
+#sub button.on{background:var(--card);color:var(--acc);font-weight:600;border-inline-start:3px solid var(--acc)}
+#sub .soon{color:var(--mut)}
+#sub input{width:100%;padding:.4rem .5rem;margin-bottom:.3rem;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font:inherit;font-size:.85rem}
+#qres{display:flex;flex-direction:column;margin-bottom:.4rem;border-bottom:1px dashed var(--line)}
+#slist{display:flex;flex-direction:column;gap:2px}
+.num{display:inline-block;min-width:1.2rem;height:1.2rem;line-height:1.2rem;text-align:center;border-radius:50%;background:#fff3;font-size:.72rem}
+.ok{color:#9fe3a8;font-weight:700}
+.panel,.mapcol{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:.9rem}
+.panel h2{margin:0 0 .4rem;font-size:1.15rem}.panel p{color:var(--mut);margin:.4rem 0}
+.panel label{display:block;margin:.6rem 0 .2rem;font-weight:600;font-size:.85rem}
+.panel input[type=text],.panel input[type=number],.panel select{width:100%;padding:.45rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit}
+.panel input[type=range]{width:100%}
+.btn{background:var(--acc);color:#fff;border:0;border-radius:6px;padding:.5rem .75rem;cursor:pointer;font:inherit;margin:.25rem .25rem 0 0}
+[data-theme=dark] .btn{color:#06262a}
+.btn.alt{background:none;color:var(--acc);border:1px solid var(--acc)}
+.btn.on{outline:3px solid var(--ok)}
+.tag{display:inline-block;font-size:.72rem;padding:1px .45rem;border-radius:9px;background:var(--bg);border:1px solid var(--line);color:var(--mut)}
+.soonbox{border:1px dashed var(--line);border-radius:8px;padding:.8rem;margin-top:.6rem;color:var(--mut)}
+.maptools{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.5rem;font-size:.85rem;align-items:center}
+.maptools label{display:flex;gap:.25rem;align-items:center}
+.mapwrap{position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:repeating-conic-gradient(#8881 0 25%,#0000 0 50%) 0 0/20px 20px}
+#map{display:block;width:100%;height:auto;cursor:crosshair}
+.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--mut);pointer-events:none;padding:1.2rem}
+.zoneinfo{margin-top:.5rem;padding:.5rem .65rem;background:var(--bg);border-radius:6px;font-size:.9rem;min-height:2.6rem}
+.hint{background:var(--bg);border-inline-start:3px solid var(--acc);padding:.45rem .65rem;margin:.5rem 0;font-size:.85rem;border-radius:4px}
+.vb{display:inline-block;font-size:.78rem;padding:1px .5rem;border-radius:9px;font-weight:600}
+.v-prefer{background:#2d7a4b;color:#fff}.v-ok{background:#d9a21b;color:#1b1400}.v-avoid{background:#c0392b;color:#fff}.v-neutral{background:var(--bg);color:var(--mut);border:1px solid var(--line)}
+/* report overlay: always light, printable */
+#reportview{display:none}
+body.rp-on #reportview{display:block;position:fixed;inset:0;z-index:50;overflow:auto;background:#fff;color:#111}
+.rp-bar{position:sticky;top:0;background:#eee;padding:.5rem 1rem;display:flex;gap:.5rem;border-bottom:1px solid #ccc}
+.rp{max-width:52rem;margin:0 auto;padding:1.2rem}
+.rp h1{font-size:1.5rem;margin:.6rem 0}.rp h2{font-size:1.15rem;border-bottom:2px solid #9a4b1c;margin:1.2rem 0 .4rem;padding-bottom:.2rem}.rp h3{font-size:1rem;margin:.8rem 0 .3rem}
+.rp-head{display:flex;gap:1rem;align-items:center}.rp-logo{max-height:4rem;max-width:12rem}.rp-co{font-size:1.2rem;font-weight:700}.rp-sm{font-size:.8rem;color:#555}
+.rp-big{font-size:2.4rem;font-weight:700;color:#9a4b1c}.rp-map{max-width:100%;border:1px solid #ccc}
+.rp-warn{background:#fdecea;border:1px solid #c0392b;color:#7b1d12;padding:.5rem .7rem;margin:.6rem 0;border-radius:4px}
+.rpt{width:100%;border-collapse:collapse;font-size:.85rem;margin:.3rem 0}.rpt th,.rpt td{border:1px solid #ccc;padding:.25rem .4rem;text-align:start;vertical-align:top}.rpt th{background:#f3eee4}
+.rp-bar1{display:inline-block;width:6rem;height:.5rem;background:#eee;vertical-align:middle}.rp-bar1 i{display:block;height:.5rem;background:#9a4b1c}
+.rp .hint{background:#faf6ee;color:#111}.rp .tag{color:#444}
+.rp-cert{border:6px double #9a4b1c;padding:1.5rem;text-align:center}.rp-certtext{font-size:1.1rem}
+@media print{body.rp-on>*:not(#reportview){display:none!important}body.rp-on #reportview{position:static;overflow:visible}.rp-bar{display:none}@page{margin:14mm}}
+.ztab{width:100%;font-size:.85rem;border-collapse:collapse}.ztab td{padding:2px 4px}
+@media (max-width:1100px){.layout{grid-template-columns:1fr}#sub{flex-direction:row;flex-wrap:wrap}.top{flex-wrap:wrap;padding-bottom:.3rem}#menu{order:3;flex-basis:100%}.ctl{margin-inline-start:auto}}

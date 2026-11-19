@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#9a4b1c">
+<title>VastuSense</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">VastuSense</div>
+  <nav id="menu"></nav>
+  <div class="ctl">
+    <select id="langsel" aria-label="Language"></select>
+    <button id="themebtn" class="ic" title="Theme">&#9680;</button>
+    <button id="fdown" class="ic" title="A-">A&minus;</button>
+    <button id="fup" class="ic" title="A+">A+</button>
+  </div>
+</header>
+<div class="layout">
+  <aside id="sub"></aside>
+  <section id="panel" class="panel"></section>
+  <section class="mapcol">
+    <div class="maptools" id="maptools"></div>
+    <div class="mapwrap"><canvas id="map" width="900" height="650"></canvas>
+      <div id="empty" class="empty"></div>
+    </div>
+    <div id="zoneinfo" class="zoneinfo"></div>
+  </section>
+</div>
+<div id="reportview"></div>
+<script src="data.js"></script>
+<script src="i18n.js"></script>
+<script src="map.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
