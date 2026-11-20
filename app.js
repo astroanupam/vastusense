@@ -1464,6 +1464,9 @@ const AUTH_KEY='vs.auth', SESS_KEY='vs.sess', ROLE_RANK={user:1,researcher:2,sup
 let SESSION=null, authMode='in';
 // Password rule: at least 8 characters with a letter, a digit, an uppercase letter and a special character.
 const pwOk = p => typeof p==='string' && p.length>=8 && p.length<=200 && /\p{L}/u.test(p) && /\d/.test(p) && /\p{Lu}/u.test(p) && /[^\p{L}\d\s]/u.test(p);
+// Registration e-mail: Gmail or Yahoo addresses only.
+const MAIL_DOM=['gmail.com','googlemail.com','yahoo.com','yahoo.in','yahoo.co.in','yahoo.co.uk','yahoo.fr','yahoo.es','yahoo.it','yahoo.de','ymail.com'];
+const mailOk = e => { if(typeof e!=='string'||e.length>254) return false; const m=/^([a-z0-9][a-z0-9._%+-]{0,63})@([a-z0-9.-]+)$/i.exec(e.trim()); return !!m && !/\.\./.test(m[1]) && !/[.]$/.test(m[1]) && MAIL_DOM.includes(m[2].toLowerCase()); };
 const b64=u=>btoa(String.fromCharCode(...u)), unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)), B64OK=/^[A-Za-z0-9+\/=]{20,64}$/, UNAME=/^[a-z0-9._-]{3,32}$/;
 async function pwHash(pw,saltB64){
   const salt=saltB64?unb64(saltB64):crypto.getRandomValues(new Uint8Array(16)), key=await crypto.subtle.importKey('raw',new TextEncoder().encode(String(pw).slice(0,200)),'PBKDF2',false,['deriveBits']);
@@ -1471,8 +1474,8 @@ async function pwHash(pw,saltB64){
 }
 function authDB(){
   const d=safeJSON(store.get(AUTH_KEY,'null')), o={su:null,users:[],fails:0,lockUntil:0}; if(!d||typeof d!=='object') return o;
-  if(d.su&&UNAME.test(d.su.u)&&B64OK.test(d.su.salt)&&B64OK.test(d.su.hash)) o.su={u:d.su.u,salt:d.su.salt,hash:d.su.hash,rsalt:B64OK.test(d.su.rsalt)?d.su.rsalt:'',rhash:B64OK.test(d.su.rhash)?d.su.rhash:''};
-  o.users=(Array.isArray(d.users)?d.users:[]).slice(0,200).map(x=>x&&UNAME.test(x.u)&&B64OK.test(x.salt)&&B64OK.test(x.hash)&&['user','researcher'].includes(x.role)&&['pending','approved','suspended'].includes(x.status)&&/^[0-9a-f]{8,32}$/.test(x.id)?{id:x.id,u:x.u,role:x.role,status:x.status,salt:x.salt,hash:x.hash,at:sNum(x.at,0,9e15,0)}:null).filter(Boolean);
+  if(d.su&&UNAME.test(d.su.u)&&B64OK.test(d.su.salt)&&B64OK.test(d.su.hash)) o.su={u:d.su.u,salt:d.su.salt,hash:d.su.hash,rsalt:B64OK.test(d.su.rsalt)?d.su.rsalt:'',rhash:B64OK.test(d.su.rhash)?d.su.rhash:'',mail:(mailOk(d.su.mail)&&/@(gmail|googlemail)\.com$/i.test(d.su.mail))?String(d.su.mail).toLowerCase():''};
+  o.users=(Array.isArray(d.users)?d.users:[]).slice(0,200).map(x=>x&&UNAME.test(x.u)&&B64OK.test(x.salt)&&B64OK.test(x.hash)&&['user','researcher'].includes(x.role)&&['pending','approved','suspended'].includes(x.status)&&/^[0-9a-f]{8,32}$/.test(x.id)?{id:x.id,u:x.u,role:x.role,status:x.status,salt:x.salt,hash:x.hash,at:sNum(x.at,0,9e15,0),email:mailOk(x.email)?String(x.email).toLowerCase():''}:null).filter(Boolean);
   o.fails=sNum(d.fails,0,100,0); o.lockUntil=sNum(d.lockUntil,0,9e15,0); return o;
 }
 const authSave = db => store.set(AUTH_KEY, JSON.stringify(db));
@@ -1509,6 +1512,7 @@ function authOpen(mode){
   if(!reg&&!setup&&!rec) h+=`<label>${t('au.as')}</label><select id="au_role" onchange="authRoleChange()"><option value="superadmin">${t('au.role.superadmin')}</option><option value="researcher">${t('au.role.researcher')}</option><option value="user">${t('au.role.user')}</option></select>`;
   if(reg) h+=`<label>${t('au.as')}</label><select id="au_role"><option value="user">${t('au.role.user')}</option><option value="researcher">${t('au.role.researcher')}</option></select>`;
   h+=`<label>${t('au.user')}</label><input type="text" id="au_user" autocomplete="username" maxlength="32" autocapitalize="none" spellcheck="false">`;
+  if(reg) h+=`<label>${t('au.email')} *</label><input type="text" id="au_email" inputmode="email" autocomplete="email" maxlength="254" autocapitalize="none" spellcheck="false" placeholder="name@gmail.com"><div class="rp-sm"><b>${t('au.emailnote')}</b></div>`;
   if(rec) h+=`<label>${t('au.key')}</label><input type="text" id="au_key" maxlength="40" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX">`;
   h+=`<label>${t(rec?'au.newpass':'au.pass')}</label><input type="password" id="au_pass" autocomplete="${reg||setup||rec?'new-password':'current-password'}" maxlength="200">`;
   if(reg||setup||rec) h+=`<div class="rp-sm">${t('au.policy')}</div><label>${t('au.pass2')}</label><input type="password" id="au_pass2" autocomplete="new-password" maxlength="200">`;
@@ -1563,10 +1567,11 @@ function authForgot(){ const r=$('au_role'); if(r&&r.value==='superadmin') authO
 async function authNewKey(){ if(!SESSION||SESSION.role!=='superadmin') return; const db=authDB(); if(!db.su) return; const k=await authSetKey(db); authSave(db); authShowKey(k); }
 async function authRegister(){
   const role=$('au_role').value, u=$('au_user').value.trim().toLowerCase(), p=$('au_pass').value, p2=$('au_pass2').value, db=authDB();
-  if(!['user','researcher'].includes(role)) return; if(!UNAME.test(u)){ authMsg('au.baduser'); return; } if(!pwOk(p)){ authMsg('au.policy'); return; } if(p!==p2){ authMsg('au.mismatch'); return; }
+  const em=($('au_email').value||'').trim().toLowerCase();
+  if(!['user','researcher'].includes(role)) return; if(!UNAME.test(u)){ authMsg('au.baduser'); return; } if(!mailOk(em)){ authMsg('au.bademail'); return; } if(db.users.some(x=>x.email===em)){ authMsg('au.emailused'); return; } if(!pwOk(p)){ authMsg('au.policy'); return; } if(p!==p2){ authMsg('au.mismatch'); return; }
   if((db.su&&db.su.u===u)||db.users.some(x=>x.u===u)){ authMsg('au.exists'); return; } if(db.users.length>=200){ authMsg('au.exists'); return; }
   const h=await pwHash(p), id=[...crypto.getRandomValues(new Uint8Array(8))].map(x=>x.toString(16).padStart(2,'0')).join('');
-  db.users.push({id,u,role,status:'pending',salt:h.salt,hash:h.hash,at:Date.now()}); authSave(db); authMsg('au.requested'); $('au_pass').value=$('au_pass2').value='';
+  db.users.push({id,u,role,status:'pending',salt:h.salt,hash:h.hash,at:Date.now(),email:em}); authSave(db); authMsg('au.requested'); $('au_pass').value=$('au_pass2').value='';
 }
 // ---- Superadmin: approve registrations and manage logins
 function authAdmin(){ go('admin','accounts'); }
@@ -1575,17 +1580,31 @@ function adminSecurity(){
   const db=authDB();
   return `<h2>${t('s.security')}</h2><p>${t('au.sec.info')}</p>
     <table class="ztab"><tr><td><b>${t('au.user')}</b></td><td>${esc(db.su?db.su.u:'')}</td></tr><tr><td><b>${t('au.key')}</b></td><td>${db.su&&db.su.rhash?t('au.key.set'):t('au.key.none')}</td></tr></table>
+    <label>${t('au.sender')}</label><input type="text" id="au_sender" inputmode="email" maxlength="254" autocapitalize="none" spellcheck="false" placeholder="name@gmail.com" value="${esc(db.su?db.su.mail:'')}" onchange="authSetSender(this.value)">
     <button class="btn" onclick="authAct('su','reset')">${t('au.adm.mypw')}</button><button class="btn alt" onclick="authNewKey()">${t('au.newkey')}</button>
     <div class="hint"><small>${t('au.keywhy')}</small></div>`;
 }
 function adminAccounts(){
   const db=authDB();
-  const row=x=>`<tr><td><b>${esc(x.u)}</b><br><small>${t('au.role.'+x.role)} &middot; ${t('au.status.'+x.status)}</small></td><td style="white-space:nowrap">${x.status==='pending'?`<button class="btn" style="margin:0" onclick="authAct('${x.id}','approve')">${t('au.adm.approve')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','del')">${t('au.adm.reject')}</button>`
-    :`<button class="btn alt" style="margin:0" onclick="authAct('${x.id}','${x.status==='approved'?'suspend':'approve'}')">${t(x.status==='approved'?'au.adm.suspend':'au.adm.restore')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','reset')">${t('au.adm.reset')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','del')">${t('au.adm.del')}</button>`}</td></tr>`;
+  const row=x=>`<tr><td><b>${esc(x.u)}</b><br><small>${esc(x.email||'-')}<br>${t('au.role.'+x.role)} &middot; ${t('au.status.'+x.status)}</small></td><td style="white-space:nowrap">${x.status==='pending'?`<button class="btn" style="margin:0" onclick="authAct('${x.id}','approve')">${t('au.adm.approve')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','del')">${t('au.adm.reject')}</button>`
+    :`${x.status==='approved'&&x.email?`<button class="btn" style="margin:0" onclick="authMail('${x.id}')">${t('au.mail')}</button> `:''}<button class="btn alt" style="margin:0" onclick="authAct('${x.id}','${x.status==='approved'?'suspend':'approve'}')">${t(x.status==='approved'?'au.adm.suspend':'au.adm.restore')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','reset')">${t('au.adm.reset')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','del')">${t('au.adm.del')}</button>`}</td></tr>`;
   const pend=db.users.filter(x=>x.status==='pending'), rest=db.users.filter(x=>x.status!=='pending');
   return `<h2>${t('m.admin')}</h2><p>${t('au.adm.info')}</p><b>${t('au.adm.pending')} (${pend.length})</b>${pend.length?`<table class="ztab">${pend.map(row).join('')}</table>`:`<div class="rp-sm">${t('au.adm.none')}</div>`}
     <p></p><b>${t('au.adm.title')} (${rest.length})</b>${rest.length?`<table class="ztab">${rest.map(row).join('')}</table>`:`<div class="rp-sm">${t('au.adm.none')}</div>`}
     <p class="rp-sm">${t('au.lock')}</p>`;
+}
+// The app has no server and cannot send e-mail itself. This opens the Superadmin's own mail program with the approval message ready
+// (it never contains the password). The Superadmin presses Send.
+function authSetSender(v){
+  if(!isSA()) return; const m=String(v||'').trim().toLowerCase(), db=authDB(); if(!db.su) return;
+  if(m===''){ db.su.mail=''; authSave(db); toast('au.senderok'); return; }
+  if(!mailOk(m)||!/@(gmail|googlemail)\.com$/.test(m)){ toast('au.senderbad'); return; } db.su.mail=m; authSave(db); toast('au.senderok');
+}
+// Opens Gmail's compose window (in the browser, signed in as the sender address) with the approval message ready; the Superadmin presses Send.
+function authMail(id){
+  if(!isSA()) return; const db=authDB(), x=db.users.find(y=>y.id===id); if(!x||x.status!=='approved'||!mailOk(x.email)) return;
+  const q='view=cm&fs=1&to='+encodeURIComponent(x.email)+'&su='+encodeURIComponent(t('au.mail.subj'))+'&body='+encodeURIComponent(t('au.mail.body',{u:x.u,r:t('au.role.'+x.role)}))+(db.su&&db.su.mail?'&authuser='+encodeURIComponent(db.su.mail):'');
+  window.open('https://mail.google.com/mail/?'+q,'_blank','noopener,noreferrer');
 }
 function authAct(id,act){
   if(!SESSION||SESSION.role!=='superadmin') return; const db=authDB();
