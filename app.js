@@ -1369,28 +1369,38 @@ function grahaPanel(){
 /* ---------- About us ---------- */
 let aboutEdit = null;   // id of the person being edited
 // Built-in profile text and photo are the defaults; a visitor's own edits (kept in their browser) only replace them when not empty.
-function loadAbout(){ const s=safeJSON(store.get('vs.about','null')); if(s&&Array.isArray(s.people)) s.people.forEach(sp=>{ const p=ABOUT.people.find(x=>sp&&x.id===sp.id); if(!p) return;
+function loadAbout(){ const s=safeJSON(store.get('vs.about','null')); if(s&&Array.isArray(s.people)) s.people.forEach(sp=>{
+  if(sp&&sp.custom===true&&/^c[0-9a-f]{8}$/.test(sp.id)&&!ABOUT.people.some(x=>x.id===sp.id)&&ABOUT.people.length<20&&sStr(sp.name,120)) ABOUT.people.push({id:sp.id,custom:true,name:sStr(sp.name,120),role:'',tagline:'',bio:'',photo:''});
+  const p=ABOUT.people.find(x=>sp&&x.id===sp.id); if(!p) return;
   [['role',sStr(sp.role,200)],['tagline',sStr(sp.tagline,300)],['bio',sStr(sp.bio,LIMITS.area)],['photo',sDataImg(sp.photo,600000)]].forEach(([k,v])=>{ if(v) p[k]=v; }); }); }
 function saveAbout(){ store.set('vs.about', JSON.stringify({people:ABOUT.people})); }
+// Editing, adding and deleting profiles is for the Superadmin only.
+const isSA = () => !!(SESSION && SESSION.role==='superadmin');
+function aboutAdd(){
+  if(!isSA()||ABOUT.people.length>=20) return; const id='c'+[...crypto.getRandomValues(new Uint8Array(4))].map(x=>x.toString(16).padStart(2,'0')).join('');
+  ABOUT.people.push({id,custom:true,name:'New profile',role:'',tagline:'',bio:'',photo:''}); aboutEdit=id; saveAbout(); renderPanel();
+}
+function aboutDel(id){ if(!isSA()) return; askConfirm(t('p.confirmclear'),()=>{ const i=ABOUT.people.findIndex(x=>x.id===id&&x.custom); if(i>=0){ ABOUT.people.splice(i,1); aboutEdit=null; saveAbout(); renderPanel(); } }); }
 const initials = n => n.split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
 function aboutPanel(){
   const card = p => {
-    const ed = aboutEdit===p.id, pic = p.photo ? `<img src="${p.photo}" alt="${esc(p.name)}" style="width:7rem;height:7rem;border-radius:50%;object-fit:cover;border:2px solid var(--acc)">` : `<div style="width:7rem;height:7rem;border-radius:50%;background:var(--bg);border:2px solid var(--acc);display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--acc)">${esc(initials(p.name))}</div>`;
+    const sa=isSA(), ed = sa&&aboutEdit===p.id, pic = p.photo ? `<img src="${p.photo}" alt="${esc(p.name)}" style="width:7rem;height:7rem;border-radius:50%;object-fit:cover;border:2px solid var(--acc)">` : `<div style="width:7rem;height:7rem;border-radius:50%;background:var(--bg);border:2px solid var(--acc);display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--acc)">${esc(initials(p.name))}</div>`;
     return `<div class="hint" style="display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap">${pic}<div style="flex:1;min-width:12rem"><h2 style="margin:0">${esc(p.name)}</h2>
-      ${ed ? `<label>${t('p.role')}</label><input type="text" value="${esc(p.role)}" onchange="aboutSet('${p.id}','role',this.value)">
+      ${ed ? `${p.custom?`<label>${t('b.name')}</label><input type="text" value="${esc(p.name)}" onchange="aboutSet('${p.id}','name',this.value)">`:''}<label>${t('p.role')}</label><input type="text" value="${esc(p.role)}" onchange="aboutSet('${p.id}','role',this.value)">
         <label>${t('p.tagline')}</label><input type="text" value="${esc(p.tagline)}" onchange="aboutSet('${p.id}','tagline',this.value)">
         <label>${t('p.bio')}</label><textarea rows="6" style="width:100%;padding:.45rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit" onchange="aboutSet('${p.id}','bio',this.value)">${esc(p.bio)}</textarea>
         <label>${t('p.photo')}</label><input type="file" accept="image/*" onchange="aboutPhoto('${p.id}',this.files[0])">
         ${p.photo?`<button class="btn alt" onclick="aboutSet('${p.id}','photo','');renderPanel()">${t('b.removelogo')}</button>`:''}
-        <button class="btn" onclick="aboutEdit=null;renderPanel()">${t('p.done')}</button>`
-      : `${p.role?`<div style="font-weight:600;color:var(--acc)">${esc(p.role)}</div>`:''}${p.tagline?`<div class="tag" style="margin:.2rem 0">${esc(p.tagline)}</div>`:''}<p style="color:var(--ink);white-space:pre-line">${p.bio?esc(p.bio):`<span style="color:var(--mut)">${t('p.noprofile')}</span>`}</p><button class="btn alt" onclick="aboutEdit='${p.id}';renderPanel()">${t('p.editprofile')}</button>`}</div></div>`;
+        <button class="btn" onclick="aboutEdit=null;renderPanel()">${t('p.done')}</button>${p.custom?`<button class="btn alt" onclick="aboutDel('${p.id}')">${t('a.del')}</button>`:''}`
+      : `${p.role?`<div style="font-weight:600;color:var(--acc)">${esc(p.role)}</div>`:''}${p.tagline?`<div class="tag" style="margin:.2rem 0">${esc(p.tagline)}</div>`:''}<p style="color:var(--ink);white-space:pre-line">${p.bio?esc(p.bio):`<span style="color:var(--mut)">${t('p.noprofile')}</span>`}</p>${sa?`<button class="btn alt" onclick="aboutEdit='${p.id}';renderPanel()">${t('p.editprofile')}</button>`:''}`}</div></div>`;
   };
   return `<h2>${esc(ABOUT.org)}</h2><p>${t('p.aboutorg')}</p>${ABOUT.people.map(card).join('')}
-    <div class="hint"><small>${t('p.aboutnote')}</small></div><button class="btn alt" onclick="aboutExport()">${t('p.aboutexport')}</button>`;
+    <div class="hint"><small>${t('p.aboutnote')}</small></div>${isSA()?`<button class="btn" onclick="aboutAdd()">${t('au.addprof')}</button><button class="btn alt" onclick="aboutExport()">${t('p.aboutexport')}</button>`:`<div class="hint"><small>${t('au.profsa')}</small></div>`}`;
 }
-function aboutSet(id,k,v){ const p=ABOUT.people.find(x=>x.id===id); if(!p||!['role','tagline','bio','photo'].includes(k)) return; p[k] = k==='photo' ? sDataImg(v,600000) : sStr(v,k==='bio'?LIMITS.area:k==='tagline'?300:200); saveAbout(); }
-function aboutPhoto(id,f){ safeImageFile(f, 400, url=>{ aboutSet(id,'photo',url); renderPanel(); }, k=>toast(k)); }
-function aboutExport(){
+function aboutSet(id,k,v){ if(!isSA()) return; const p=ABOUT.people.find(x=>x.id===id); if(!p||!['role','tagline','bio','photo','name'].includes(k)||(k==='name'&&!p.custom)) return;
+  p[k] = k==='photo' ? sDataImg(v,600000) : sStr(v,k==='bio'?LIMITS.area:k==='tagline'?300:k==='name'?120:200); if(k==='name'&&!p.name) p.name='New profile'; saveAbout(); }
+function aboutPhoto(id,f){ if(!isSA()) return; safeImageFile(f, 400, url=>{ aboutSet(id,'photo',url); renderPanel(); }, k=>toast(k)); }
+function aboutExport(){ if(!isSA()) return;
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify({org:ABOUT.org,people:ABOUT.people},null,2)],{type:'application/json'})); a.download='vastusense-about.json'; a.click();
 }
 

@@ -79,3 +79,4 @@ body.rp-on #reportview{display:block;position:fixed;inset:0;z-index:50;overflow:
 .btn[disabled]{opacity:.4;cursor:default}
 .authcard label.chk{display:flex;gap:.45rem;align-items:center;font-weight:400;margin:.3rem 0}
 .keybox{font:700 1.3rem/1.4 ui-monospace,Consolas,monospace;letter-spacing:.08em;text-align:center;border:2px dashed var(--acc);border-radius:8px;padding:.8rem;margin:.6rem 0;user-select:all;word-break:break-all}
+.authcard label.chk{justify-content:flex-start;text-align:start;width:100%}.authcard input[type=checkbox]{width:auto!important;flex:0 0 auto;margin:0;padding:0}.authcard label.chk span{flex:1}
