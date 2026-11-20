@@ -263,6 +263,9 @@ const PANELS = {
   'astro/areport': ()=>areportPanel(),
   'admin/accounts': ()=>adminOnly(adminAccounts),
   'admin/security': ()=>adminOnly(adminSecurity),
+  'admin/active': ()=>adminOnly(()=>adminList('approved','s.active')),
+  'admin/pending': ()=>adminOnly(()=>adminList('pending','s.pending')),
+  'admin/banned': ()=>adminOnly(()=>adminList('suspended','s.banned')),
   'astro/houses': ()=>housesPanel(),
   'astro/audit': ()=>auditPanel(),
   'map/alloc': ()=>allocPanel(),
@@ -1584,14 +1587,26 @@ function adminSecurity(){
     <button class="btn" onclick="authAct('su','reset')">${t('au.adm.mypw')}</button><button class="btn alt" onclick="authNewKey()">${t('au.newkey')}</button>
     <div class="hint"><small>${t('au.keywhy')}</small></div>`;
 }
+const adminB = (id,act,key,cls) => `<button class="btn ${cls||'alt'}" onclick="authAct('${id}','${act}')">${t(key)}</button>`;
+const adminDate = ms => ms>0 ? new Date(ms).toLocaleString(LANG,{dateStyle:'medium',timeStyle:'short'}) : '-';
+// One card per login: name, e-mail, request date and the actions (they wrap, so nothing is cut off).
+const adminCard = x => `<div class="lcard"><div class="lhead"><b>${esc(x.u)}</b><span class="tag">${t('au.role.'+x.role)}</span><span class="tag st-${x.status}">${t('au.status.'+x.status)}</span></div>
+    <div class="lmail">${esc(x.email||'-')}</div><div class="lmail">${t('au.reqdate')}: ${esc(adminDate(x.at))}</div>
+    <div class="lacts">${x.status==='pending'?adminB(x.id,'approve','au.adm.approve','')+adminB(x.id,'del','au.adm.reject')
+      :(x.status==='approved'&&x.email?`<button class="btn" onclick="authMail('${x.id}')">${t('au.mail')}</button>`:'')+adminB(x.id,x.status==='approved'?'suspend':'approve',x.status==='approved'?'au.adm.suspend':'au.adm.restore')+adminB(x.id,'reset','au.adm.reset')+adminB(x.id,'del','au.adm.del')}</div></div>`;
+// A password is never shown: only a one-way hash is stored, so it cannot be read back (and showing it would be unsafe). Use Reset password instead.
+const adminPwNote = () => `<div class="hint"><small>${t('au.pwnote')}</small></div>`;
 function adminAccounts(){
-  const db=authDB();
-  const row=x=>`<tr><td><b>${esc(x.u)}</b><br><small>${esc(x.email||'-')}<br>${t('au.role.'+x.role)} &middot; ${t('au.status.'+x.status)}</small></td><td style="white-space:nowrap">${x.status==='pending'?`<button class="btn" style="margin:0" onclick="authAct('${x.id}','approve')">${t('au.adm.approve')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','del')">${t('au.adm.reject')}</button>`
-    :`${x.status==='approved'&&x.email?`<button class="btn" style="margin:0" onclick="authMail('${x.id}')">${t('au.mail')}</button> `:''}<button class="btn alt" style="margin:0" onclick="authAct('${x.id}','${x.status==='approved'?'suspend':'approve'}')">${t(x.status==='approved'?'au.adm.suspend':'au.adm.restore')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','reset')">${t('au.adm.reset')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','del')">${t('au.adm.del')}</button>`}</td></tr>`;
-  const pend=db.users.filter(x=>x.status==='pending'), rest=db.users.filter(x=>x.status!=='pending');
-  return `<h2>${t('m.admin')}</h2><p>${t('au.adm.info')}</p><b>${t('au.adm.pending')} (${pend.length})</b>${pend.length?`<table class="ztab">${pend.map(row).join('')}</table>`:`<div class="rp-sm">${t('au.adm.none')}</div>`}
-    <p></p><b>${t('au.adm.title')} (${rest.length})</b>${rest.length?`<table class="ztab">${rest.map(row).join('')}</table>`:`<div class="rp-sm">${t('au.adm.none')}</div>`}
-    <p class="rp-sm">${t('au.lock')}</p>`;
+  const db=authDB(), pend=db.users.filter(x=>x.status==='pending'), rest=db.users.filter(x=>x.status!=='pending');
+  return `<h2>${t('m.admin')}</h2>
+    <h3>${t('au.adm.pending')} (${pend.length})</h3>${pend.length?pend.map(adminCard).join(''):`<div class="rp-sm">${t('au.adm.none')}</div>`}
+    <h3 style="margin-top:1rem">${t('au.adm.title')} (${rest.length})</h3>${rest.length?rest.map(adminCard).join(''):`<div class="rp-sm">${t('au.adm.none')}</div>`}
+    ${adminPwNote()}<details style="margin-top:1rem"><summary>${t('au.adm.help')}</summary><p class="rp-sm">${t('au.adm.info')}</p><p class="rp-sm">${t('au.lock')}</p></details>`;
+}
+// The three lists: active (approved), pending and banned (suspended). Newest request first.
+function adminList(status,titleKey){
+  const l=authDB().users.filter(x=>x.status===status).sort((a,b)=>b.at-a.at);
+  return `<h2>${t(titleKey)} (${l.length})</h2>${l.length?l.map(adminCard).join(''):`<div class="hint">${t('au.adm.none')}</div>`}${adminPwNote()}`;
 }
 // The app has no server and cannot send e-mail itself. This opens the Superadmin's own mail program with the approval message ready
 // (it never contains the password). The Superadmin presses Send.

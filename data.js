@@ -517,7 +517,7 @@ const MENU = [
     {id:'classic', t:'Classical sources', stage:2},{id:'modern', t:'Modern codes', stage:2},
     {id:'rules', t:'Rule library', stage:5},{id:'gloss', t:'Glossary', stage:2},{id:'faq', t:'FAQ', stage:6}]},
   {id:'about', t:'About us', subs:[{id:'us', t:'About us', stage:1}]},
-  {id:'admin', t:'Admin', subs:[{id:'accounts', t:'Logins', stage:1},{id:'security', t:'Superadmin security', stage:1}]}   // shown to the Superadmin only
+  {id:'admin', t:'Admin', subs:[{id:'accounts', t:'Logins', stage:1},{id:'security', t:'Superadmin security', stage:1},{id:'active', t:'Active users', stage:1},{id:'pending', t:'Pending users', stage:1},{id:'banned', t:'Banned users', stage:1}]}   // shown to the Superadmin only
 ];
 
 /* City list for the birth-place lookup: about 34246 towns and cities with population over 15,000, from the GeoNames gazetteer (geonames.org), licensed CC BY 4.0. Names are ASCII; coordinates have 3 decimals. Smaller villages: type latitude and longitude. */
