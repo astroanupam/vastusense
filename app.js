@@ -1056,6 +1056,12 @@ function citySuggest(v){
   const box=$('citysug'); if(!box) return; const res=citySearch(v,12); window._csug=res;
   box.innerHTML=res.map((c,i)=>`<button class="btn alt" style="display:block;width:100%;text-align:start;margin:2px 0" onclick="cityApply(_csug[${i}])">${esc(c.n)}${c.s?', '+esc(c.s):''} (${esc(c.c)})</button>`).join('');
 }
+// Country -> state -> city drop-downs, all filled from the built-in list.
+function cityStates(cc){ return [...new Set(cityDB().filter(c=>c.c===cc).map(c=>c.s))].sort((x,y)=>x.localeCompare(y)); }
+function cityOf(cc,st){ return cityDB().filter(c=>c.c===cc&&c.s===st).sort((x,y)=>x.n.localeCompare(y.n)); }
+function birthCountry(v){ astroSet('country',v); astroSet('state',''); astroSet('city',''); renderPanel(); }
+function birthState(v){ astroSet('state',v); astroSet('city',''); renderPanel(); }
+function birthCityPick(i){ const m=(window._clist||[])[+i]; if(m) cityApply(m); }
 function birthCity(v){
   astroSet('city',v); const a=P.astro, k=normCity(v); if(!k){ birthUpdate(); return; }
   const hit=citySearch(v,50).filter(c=>normCity(c.n)===k), m=hit.find(c=>c.c===a.country)||hit[0];
@@ -1222,6 +1228,7 @@ function astroMapImg(rows){
 function birthPanel(){
   const a=P.astro=P.astro||{}, h12=!!a.h12;
   if(!a.tz && !a.manual){ const dp=safeJSON(store.get('vs.place','')||'null'); if(dp){ ['country','state','city','lat','lon','tz'].forEach(k=>{ if(!a[k]) a[k]=ASTRO_SPEC[k](dp[k]); }); } if(!a.tz) a.tz='Asia/Kolkata'; }
+  if(!a.country && !a.state && !a.city) a.country='IN';   // same default as the time zone; change it in the Country list
   const sel=(id,list,cur,onch)=>`<select id="${id}" onchange="${onch}">${list.map(([v,l])=>`<option value="${esc(v)}" ${cur===v?'selected':''}>${esc(l)}</option>`).join('')}</select>`;
   const hh = a.hr===undefined||a.hr==='' ? '' : (h12?birthHour12(a.hr):a.hr);
   return `<h2>${t('s.birth')}</h2><p>${t('p.birthinfo')}</p>
@@ -1237,8 +1244,11 @@ function birthPanel(){
     ${h12?`<label>AM / PM</label>${sel('bap',[['am','AM'],['pm','PM']],a.ampm||'am',"birthAmpm(this.value)")}`:''}
   </div>
   <div class="sec"><h3>${t('b.sec2')}</h3>
-    <label>${t('b.country')}</label>${sel('bc',[['',t('b.selcountry')]].concat(countryList()),a.country||'',"astroSet('country',this.value)")}
-    <label>${t('b.state')}</label><input type="text" value="${esc(a.state)}" onchange="astroSet('state',this.value)">
+    <label>${t('b.country')}</label>${sel('bc',[['',t('b.selcountry')]].concat(countryList()),a.country||'',"birthCountry(this.value)")}
+    <label>${t('b.state')}</label>${(()=>{ const sl=a.country?cityStates(a.country):[]; if(a.state&&!sl.includes(a.state)) sl.unshift(a.state);
+      return `<select onchange="birthState(this.value)"><option value="">${t('p.choose')}</option>${sl.map(s=>`<option value="${esc(s)}" ${s===a.state?'selected':''}>${esc(s||'-')}</option>`).join('')}</select>`; })()}
+    <label>${t('b.city')}</label>${(()=>{ const cl=(a.country&&(a.state||cityStates(a.country).includes('')))?cityOf(a.country,a.state||''):[]; window._clist=cl; const cur=cl.findIndex(c=>c.n===a.city);
+      return `<select onchange="birthCityPick(this.value)"><option value="">${t('p.choose')}</option>${cl.map((c,i)=>`<option value="${i}" ${i===cur?'selected':''}>${esc(c.n)}</option>`).join('')}</select>`; })()}
     <label>${t('b.citylist')}</label><input type="text" autocomplete="off" value="${esc(a.city)}" oninput="citySuggest(this.value)" onchange="birthCity(this.value)">
     <div id="citysug"></div>
     <div class="hint"><small>${t('b.coordnote')}</small></div>
