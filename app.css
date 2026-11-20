@@ -5,7 +5,8 @@
 html{font-size:16px}
 body{margin:0;font:1rem/1.45 system-ui,"Segoe UI","Noto Sans Devanagari","Noto Naskh Arabic",sans-serif;background:var(--bg);color:var(--ink)}
 .top{display:flex;align-items:center;gap:1rem;background:var(--hdr);color:#fff;padding:0 .9rem;position:sticky;top:0;z-index:5}
-.brand{font-weight:700;font-size:1.2rem;white-space:nowrap}
+.brand{font-weight:700;font-size:1.2rem;white-space:nowrap;display:flex;flex-direction:column;line-height:1.15;padding:.35rem 0}
+.brand .sub{font-size:.62rem;font-weight:400;opacity:.85;letter-spacing:.02em}
 #menu{display:flex;overflow-x:auto;gap:2px;flex:1}
 #menu button{background:none;border:0;color:#fff;padding:.8rem .7rem;cursor:pointer;white-space:nowrap;font:inherit;opacity:.85;border-bottom:3px solid transparent}
 #menu button.on{opacity:1;border-color:#fff;font-weight:600}
