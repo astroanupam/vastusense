@@ -508,7 +508,7 @@ const MENU = [
   {id:'astro', t:'AstroVastu', subs:[
     {id:'birth', t:'Birth details', stage:1},{id:'graha', t:'Planets and directions', stage:1},
     {id:'houses', t:'Chart houses (manual)', stage:1},{id:'audit', t:'Astro-Vastu audit', stage:1},
-    {id:'chart', t:'Birth chart', stage:11},{id:'muhurta', t:'Muhurta (auspicious time)', stage:11},{id:'match', t:'Owner and plot match', stage:11}]},
+    {id:'chart', t:'Birth chart', stage:11},{id:'areport', t:'Astro-Vastu report (PDF)', stage:1},{id:'muhurta', t:'Muhurta (auspicious time)', stage:11},{id:'match', t:'Owner and plot match', stage:11}]},
   {id:'tools', t:'Toolbox', subs:[
     {id:'compass', t:'Compass', stage:3},{id:'maindoor', t:'Main door checker', stage:5},
     {id:'pada', t:'Pada calculator', stage:3},{id:'ayadi', t:'Ayadi calculator', stage:4},{id:'colour', t:'Colour guide', stage:5},

@@ -210,6 +210,18 @@ function askText(msg, def, cb){
   w.onpointerdown=e=>{ if(e.target===w) done(null); };
   b.append(ok,no); c.append(l,i,b); w.append(c); document.body.append(w); setTimeout(()=>{ i.focus(); i.select(); },30);
 }
+// In-page yes/no box (confirm() is also blocked in some web views).
+function askConfirm(msg, cb){
+  const old=document.getElementById('askbox'); if(old) old.remove();
+  const w=document.createElement('div'); w.id='askbox'; w.className='askbox';
+  const c=document.createElement('div'); c.className='askcard';
+  const l=document.createElement('label'); l.textContent=msg;
+  const ok=document.createElement('button'); ok.className='btn'; ok.textContent='OK';
+  const no=document.createElement('button'); no.className='btn alt'; no.textContent=t('ui.cancel');
+  ok.onclick=()=>{ w.remove(); cb(); }; no.onclick=()=>w.remove();
+  w.onpointerdown=e=>{ if(e.target===w) w.remove(); };
+  c.append(l,ok,no); w.append(c); document.body.append(w); setTimeout(()=>ok.focus(),30);
+}
 M.pdown = function(e){
   if(M.mode!=='anno'||e.button>0) return; const p=M.pos(e), tl=M.annoTool, st=M.annoStyle;
   try{ M.cv.setPointerCapture(e.pointerId); }catch(x){}

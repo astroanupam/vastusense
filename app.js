@@ -55,6 +55,7 @@ function sanitizeProject(d){
   P2.rpSel={}; RP_SECTIONS.forEach(k=>{ if(s.rpSel&&s.rpSel[k]===false) P2.rpSel[k]=false; });
   P2.cert={name:sStr((s.cert||{}).name,200), ok:(s.cert||{}).ok===true};
   P2.astro=sAstro(s.astro);
+  P2.charts=(Array.isArray(s.charts)?s.charts:[]).slice(0,50).map(c=>(c&&typeof c==='object')?{label:sStr(c.label,120), data:sAstro(c.data)}:null).filter(Boolean);
   const map={northDeg:sNum(m.northDeg,-360,360,0), closed:m.closed===true, pxPerM:sNum(m.pxPerM,0,1e6,0), zsys:sEnum(m.zsys,[8,16,24,32],16)};
   map.poly=sPts(m.poly,0,500)||[]; map.centre=sPt(m.centre);
   map.devata=(Array.isArray(m.devata)&&m.devata.length===81)?m.devata.map(v=>sStr(v,60)):null;
@@ -144,7 +145,7 @@ function toast(k){ $('zoneinfo').textContent = t(k); }
 const PANELS = {
   'project/new': ()=>`<h2>${t('s.new')}</h2><label>${t('p.pname')}</label><input type="text" id="pname" value="${esc(P.name)}">
     <button class="btn" onclick="P.name=$('pname').value;toast('p.savedmem')">${t('p.setname')}</button>
-    <button class="btn alt" onclick="if(confirm(t('p.confirmfresh'))){location.reload()}">${t('p.fresh')}</button>`,
+    <button class="btn alt" onclick="askConfirm(t('p.confirmfresh'),()=>location.reload())">${t('p.fresh')}</button>`,
   'project/site': ()=>`<h2>${t('s.site')}</h2><p>${t('p.sitenote')}</p>
     <select onchange="P.siteType=this.value"><option value="">${t('p.choose')}</option>${SITE_TYPES.map(g=>`<optgroup label="${t('g.'+g.g)}">${g.t.map(k=>`<option value="${k}" ${P.siteType===k?'selected':''}>${t('t.'+k)}</option>`).join('')}</optgroup>`).join('')}</select>`,
   'project/school': ()=>`<h2>${t('s.school')}</h2><p>${t('p.schoolnote')}</p><label>${t('p.school')}</label>
@@ -252,6 +253,7 @@ const PANELS = {
   'astro/birth': ()=>birthPanel(),
   'astro/graha': ()=>grahaPanel(),
   'astro/chart': ()=>chartPanel(),
+  'astro/areport': ()=>areportPanel(),
   'astro/houses': ()=>housesPanel(),
   'astro/audit': ()=>auditPanel(),
   'map/alloc': ()=>allocPanel(),
@@ -543,8 +545,24 @@ function rpRules(items){
   return rpTbl([t('p.roomtype'),'',t('p.weight'),t('p.source')], usedRules(items).map(r=>[typeLabel(r.room), `<span class="vb v-prefer">${(r.prefer||[]).join(' ')||'-'}</span> <span class="vb v-ok">${(r.accept||[]).join(' ')||'-'}</span> <span class="vb v-avoid">${(r.avoid||[]).join(' ')||'-'}</span>`, r.weight||1, (esc(r.source)||t('p.srcnone'))+' — '+stLabel(r.status)]));
 }
 function showReport(html){
-  $('reportview').innerHTML = `<div class="rp-bar"><button class="btn" onclick="window.print()">${t('rp.print')}</button><button class="btn alt" onclick="closeReport()">${t('rp.close')}</button></div><div class="rp">${html}</div><div class="rp-wm" aria-hidden="true">${'<span>VASTUSENSE BY ANOOPAM</span>'.repeat(40)}</div>`;
+  $('reportview').innerHTML = `<div class="rp-bar"><button class="btn" onclick="window.print()">${t('rp.print')}</button><button class="btn alt" id="rpedit" onclick="rpEdit()">${t('rp.edit')}</button><button class="btn alt" onclick="rpSave()">${t('rp.save')}</button><button class="btn alt" onclick="closeReport()">${t('rp.close')}</button><span class="rp-sm" style="align-self:center">${t('rp.pdfhint')}</span></div><div class="rp">${html}</div><div class="rp-wm" aria-hidden="true">${'<span>VASTUSENSE BY ANOOPAM</span>'.repeat(40)}</div>`;
+  const rp=document.querySelector('#reportview .rp');   // edited text is plain text only: pasted or dropped markup is refused
+  rp.addEventListener('paste',e=>{ e.preventDefault(); const s=(e.clipboardData||window.clipboardData).getData('text/plain'); document.execCommand('insertText',false,String(s).slice(0,5000)); });
+  rp.addEventListener('drop',e=>e.preventDefault());
   document.body.classList.add('rp-on'); $('reportview').scrollTop = 0;
+}
+function rpEdit(){
+  const r=document.querySelector('#reportview .rp'); if(!r) return; const on=r.getAttribute('contenteditable')!=='true';
+  r.setAttribute('contenteditable',on?'true':'false'); r.classList.toggle('editing',on); $('rpedit').textContent=t(on?'rp.editdone':'rp.edit');
+}
+// Save: a stand-alone, script-free HTML file of the report as it is now (edits included). Open it in any browser to view, edit again or print to PDF.
+function rpSave(){
+  const r=document.querySelector('#reportview .rp'); if(!r) return; const c=r.cloneNode(true); c.removeAttribute('contenteditable'); c.classList.remove('editing');
+  c.querySelectorAll('script,iframe,object,embed,link,meta,base,form').forEach(x=>x.remove());
+  c.querySelectorAll('*').forEach(x=>{ [...x.attributes].forEach(a=>{ if(/^on/i.test(a.name)||(/^(href|src)$/i.test(a.name)&&!/^(data:image\/(png|jpeg|webp);base64,|#)/i.test(a.value))) x.removeAttribute(a.name); }); });
+  let css=''; try{ for(const s of document.styleSheets) for(const x of s.cssRules) css+=x.cssText+'\n'; }catch(e){}
+  const html='<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'"><meta name="viewport" content="width=device-width,initial-scale=1"><title>'+esc(P.name||'VastuSense report')+'</title><style>'+css.replace(/<\/style/gi,'')+'body{display:block!important;background:#fff;color:#111;margin:0}</style></head><body class="rp-on"><div id="reportview" style="display:block;position:static"><div class="rp">'+c.innerHTML+'</div><div class="rp-wm">'+'<span>VASTUSENSE BY ANOOPAM</span>'.repeat(40)+'</div></div></body></html>';
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([html],{type:'text/html'})); a.download=(sStr(P.name,40).replace(/[^\w\- ]+/g,'')||'vastusense')+'-report.html'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),3000);
 }
 function closeReport(){ document.body.classList.remove('rp-on'); $('reportview').innerHTML=''; }
 function buildReport(){
@@ -960,7 +978,7 @@ function drawPanel(){
     <label>${t('p.thick')}: <b id="thv">${st.w}</b></label><input type="range" min="1" max="20" value="${st.w}" oninput="$('thv').textContent=this.value;annoSet('w',+this.value)">
     <label>${t('p.dash')}</label><select onchange="annoSet('dash',this.value)">${opt([['solid','dash.solid'],['dash','dash.dash'],['dot','dash.dot'],['dd','dash.dd']],st.dash)}</select>
     <label>${t('p.textsize')}</label><input type="number" min="6" max="80" value="${st.size}" onchange="annoSet('size',+this.value)">
-    <div style="margin-top:.6rem"><button class="btn alt" onclick="M.annoUndoDo()">${t('p.undo')}</button><button class="btn alt" onclick="M.annoRedoDo()">${t('p.redo')}</button><button class="btn alt" onclick="if(confirm(t('p.confirmclear')))M.annoClear()">${t('p.clearall')}</button></div>`;
+    <div style="margin-top:.6rem"><button class="btn alt" onclick="M.annoUndoDo()">${t('p.undo')}</button><button class="btn alt" onclick="M.annoRedoDo()">${t('p.redo')}</button><button class="btn alt" onclick="askConfirm(t('p.confirmclear'),()=>M.annoClear())">${t('p.clearall')}</button></div>`;
 }
 function annoTool(k){ if(!ANNO_TOOLS.some(x=>x[0]===k)) return; M.annoTool=k; M.annoSel=-1; renderPanel(); M.draw(); }
 function annoSet(k,v){
@@ -1039,7 +1057,7 @@ function birthTimeSet(k,v){
 function birthAmpm(v){ const a=P.astro=P.astro||{}; a.ampm=v==='pm'?'pm':'am'; if(a.hr!==''&&a.hr!==undefined){ const h=(+a.hr)%12; astroSet('hr',String(h+(a.ampm==='pm'?12:0))); } birthUpdate(); }
 function birthMode(h12){ astroSet('h12',h12); const a=P.astro; if(h12) a.ampm = (+a.hr>=12)?'pm':'am'; renderPanel(); }
 function birthKeepPlace(on){ const a=P.astro||{}; if(on) store.set('vs.place',JSON.stringify({country:a.country||'',state:a.state||'',city:a.city||'',lat:a.lat||'',lon:a.lon||'',tz:a.tz||''})); else store.set('vs.place',''); }
-function birthClear(){ if(confirm(t('p.confirmclear'))){ const h=(P.astro||{}).houses; P.astro={houses:h}; renderPanel(); } }
+function birthClear(){ askConfirm(t('p.confirmclear'),()=>{ const h=(P.astro||{}).houses; P.astro={houses:h}; renderPanel(); }); }
 /* ---------- City lookup (built-in list, see CITIES in data.js) ---------- */
 const normCity = s => String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').trim().toLowerCase();
 // The list is ordered by population, so the biggest match comes first.
@@ -1131,8 +1149,8 @@ function astroCalc(){
 const dms = x => { const d=Math.floor(x), m=Math.floor((x-d)*60); return d+'°'+String(m).padStart(2,'0')+"'"; };
 function astroChartSvg(res){
   const byH={}; GRAHAS.forEach(g=>{ const h=res.pos[g].house; (byH[h]=byH[h]||[]).push(GAB[g]+(res.pos[g].retro&&g!=='Rahu'&&g!=='Ketu'?'(R)':'')); });
-  const body=Object.keys(KPTS).map(h=>{ const p=KPTS[h], c=kcen(p), sn=((res.asc.sign+(h-1))%12)+1, pl=(byH[h]||[]), line1=pl.slice(0,3).join(' '), line2=pl.slice(3).join(' ');
-    return `<polygon points="${p.map(q=>q.join(',')).join(' ')}" fill="${h==1?'#fff3df':'#fff'}" stroke="#555"/><text x="${c[0]}" y="${c[1]-8}" font-size="9" text-anchor="middle" fill="#777">${sn}</text><text x="${c[0]}" y="${c[1]+4}" font-size="10" font-weight="700" text-anchor="middle">${esc(line1)}</text><text x="${c[0]}" y="${c[1]+15}" font-size="10" font-weight="700" text-anchor="middle">${esc(line2)}</text>`; }).join('');
+  const body=Object.keys(KPTS).map(h=>{ const p=KPTS[h], c=kcen(p), sn=((res.asc.sign+(h-1))%12)+1, pl=(byH[h]||[]), line1=pl.slice(0,2).join(' '), line2=pl.slice(2,4).join(' '), line3=pl.slice(4).join(' ');
+    return `<polygon points="${p.map(q=>q.join(',')).join(' ')}" fill="${h==1?'#fff3df':'#fff'}" stroke="#555"/><text x="${c[0]}" y="${c[1]-19}" font-size="10" font-weight="700" text-anchor="middle" fill="#9a4b1c">${esc(ASTRO_HOUSES[h-1].z)}</text><text x="${c[0]}" y="${c[1]-8}" font-size="9" text-anchor="middle" fill="#777">H${h} &middot; ${sn}</text><text x="${c[0]}" y="${c[1]+4}" font-size="10" font-weight="700" text-anchor="middle">${esc(line1)}</text><text x="${c[0]}" y="${c[1]+15}" font-size="10" font-weight="700" text-anchor="middle">${esc(line2)}</text><text x="${c[0]}" y="${c[1]+26}" font-size="10" font-weight="700" text-anchor="middle">${esc(line3)}</text>`; }).join('');
   return `<svg viewBox="0 0 300 300" style="width:100%;max-width:26rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" role="img">${body}</svg>`;
 }
 function chartPanel(){
@@ -1144,18 +1162,50 @@ function chartPanel(){
   // Birth chart (left) and the Vastu plan turned East-up with the 12 house zones (right), side by side. Planets come from this calculation.
   const rows=astroAudit().map(r=>({...r, planets:GRAHAS.filter(g=>res.pos[g].house===r.x.h).map(g=>GAB[g]).join(' ')})), mp=astroMapImg(rows);
   h+=`<div style="display:flex;flex-wrap:wrap;gap:.8rem;align-items:flex-start"><div style="flex:1;min-width:15rem">${wmSvg(astroChartSvg(res))}<div class="rp-sm" style="font-size:.8rem">${t('p.chartleft')}</div></div>
-    <div style="flex:1;min-width:15rem">${mp||`<div class="hint">${t('p.auditneed')}</div>`}<div class="rp-sm" style="font-size:.8rem">${t('p.chartright')}</div></div></div>`;
+    <div style="flex:1;min-width:15rem">${mp}${M.closed?'':`<div class="hint">${t('p.auditneed')}</div>`}<div class="rp-sm" style="font-size:.8rem">${t('p.chartright')}</div></div></div>`;
   h+=`<table class="ztab" style="margin-top:.6rem"><tr><td><b>${t('c.planet')}</b></td><td><b>${t('c.sign')}</b></td><td><b>${t('c.deg')}</b></td><td><b>${t('c.house')}</b></td><td><b>${t('c.nak')}</b></td></tr>`
     + `<tr><td>${t('c.asc')}</td><td>${RASHI[res.asc.sign]}</td><td>${dms(res.asc.deg)}</td><td>1</td><td>${res.asc.nak}</td></tr>`
     + GRAHAS.map(g=>{ const p=res.pos[g]; return `<tr><td>${t('gr.'+g)}${p.retro?' (R)':''}</td><td>${RASHI[p.sign]}</td><td>${dms(p.deg)}</td><td>${p.house}</td><td>${p.nak}-${p.pada}</td></tr>`; }).join('')+`</table>`;
   h+=`<div class="hint"><small>${t('c.retro')}${notes.length?'<br>'+notes.map(esc).join('<br>'):''}</small></div>`;
-  h+=`<button class="btn" onclick="astroChartCopy()">${t('c.copy')}</button><div class="hint"><small>${t('p.astronote')}</small></div>`;
+  h+=`<button class="btn" onclick="astroChartCopy()">${t('c.copy')}</button><button class="btn alt" onclick="chartSave()">${t('a.savechart')}</button><button class="btn alt" onclick="astroReport()">${t('a.build')}</button><div class="hint"><small>${t('p.astronote')}</small></div>`;
   return h;
 }
 function astroChartCopy(){
   const res=astroCalc(); if(!res||res.err) return; const a=P.astro; a.asc=RASHI[res.asc.sign]; a.houses=a.houses||{};
   for(let h=1;h<=12;h++){ a.houses[h]=a.houses[h]||{state:'',planets:''}; a.houses[h].planets=GRAHAS.filter(g=>res.pos[g].house===h).map(g=>GAB[g]).join(' '); }
   toast('c.copied');
+}
+/* ---------- Saved charts and the page-wise Astro-Vastu report ---------- */
+function chartSave(){
+  const a=P.astro||{}; if(!a.date){ toast('c.needsave'); return; } P.charts=P.charts||[]; if(P.charts.length>=50){ toast('c.needsave'); return; }
+  P.charts.push({label:sStr((a.name||'-')+' · '+birthDateShow()+(a.city?' · '+a.city:''),120), data:sAstro(JSON.parse(JSON.stringify(a)))}); toast('c.savedok'); renderPanel();
+}
+function chartOpen(i){ const c=(P.charts||[])[i]; if(!c) return; P.astro=sAstro(c.data); toast('c.opened'); renderPanel(); }
+function chartDel(i){ askConfirm(t('p.confirmclear'),()=>{ (P.charts||[]).splice(i,1); renderPanel(); }); }
+function areportPanel(){
+  const ch=P.charts||[];
+  return `<h2>${t('s.areport')}</h2><p>${t('a.rinfo')}</p>
+    <button class="btn" onclick="astroReport()">${t('a.build')}</button><button class="btn alt" onclick="chartSave()">${t('a.savechart')}</button>
+    <h3 style="margin-top:1rem">${t('a.charts')}</h3>
+    ${ch.length?`<table class="ztab">${ch.map((c,i)=>`<tr><td>${esc(c.label)}</td><td><button class="btn alt" style="margin:0" onclick="chartOpen(${i})">${t('a.open')}</button> <button class="btn alt" style="margin:0" onclick="chartDel(${i})">${t('a.del')}</button></td></tr>`).join('')}</table>`:`<div class="hint">${t('a.nonec')}</div>`}
+    <div class="hint"><small>${t('a.saveproj')}</small></div>`;
+}
+function astroReport(){
+  const res=astroCalc(); if(!res||res.err){ toast('c.need'); return; }
+  const a=P.astro, rows=astroAudit().map(r=>({...r, planets:GRAHAS.filter(g=>res.pos[g].house===r.x.h).map(g=>GAB[g]).join(' ')})), mp=astroMapImg(rows), N=5, b=P.brand||{};
+  const pg=(n,title,body)=>`<section class="rp-page"><h2>${title}</h2>${body}<div class="rp-foot rp-sm">VASTUSENSE BY ANOOPAM &middot; ${t('a.pn',{n,m:N})}</div></section>`;
+  const gen={f:t('b.g.f'),m:t('b.g.m'),o:t('b.g.o')}[a.gender]||'-', place=[a.city,a.state,a.country].filter(Boolean).map(esc).join(', ')||'-';
+  const p1=rpHeader('a.rtitle')+rpTbl(null,[[t('b.name'),esc(a.name)||'-',t('b.gender'),gen],[t('b.date'),birthDateShow()||'-',t('b.rating'),a.rating?t('rt.'+a.rating):'-'],
+    [t('b.sec2'),place,t('b.lat')+' / '+t('b.lon'),esc(a.lat)+' / '+esc(a.lon)],[t('b.tz'),esc(a.manual?a.moff:a.tz),t('b.check'),esc(birthCheckText())],
+    [t('b.ayan'),esc(a.ayan||'lahiri')+' ('+dms(res.ay)+')',t('b.hsys'),esc(a.hsys||'whole')],[t('b.node'),esc(a.node||'mean'),'','']])+(a.notes?`<h3>${t('b.notes')}</h3><p>${esc(a.notes)}</p>`:'');
+  const tbl=rpTbl([t('c.planet'),t('c.sign'),t('c.deg'),t('c.house'),t('c.nak')],[[t('c.asc'),RASHI[res.asc.sign],dms(res.asc.deg),1,res.asc.nak]].concat(GRAHAS.map(g=>{ const p=res.pos[g]; return [t('gr.'+g)+(p.retro?' (R)':''),RASHI[p.sign],dms(p.deg),p.house,p.nak+'-'+p.pada]; })));
+  const p2=`<div style="text-align:center">${wmSvg(astroChartSvg(res))}</div>`+tbl+`<p class="rp-sm">${t('c.retro')}</p><p class="rp-sm">${t('c.info')}</p>`;
+  const p3=`<div style="display:flex;flex-wrap:wrap;gap:.8rem;align-items:flex-start"><div style="flex:1;min-width:14rem">${wmSvg(astroChartSvg(res))}<div class="rp-sm">${t('p.chartleft')}</div></div><div style="flex:1;min-width:14rem">${mp}${M.closed?'':`<div class="rp-warn">${t('p.auditneed')}</div>`}<div class="rp-sm">${t('p.chartright')}</div></div></div>`
+    +rpTbl(['H',t('p.dir'),t('c.planet'),t('p.state'),t('p.inzone'),t('p.verdict')],rows.map(r=>['H'+r.x.h,r.x.z,r.planets||'-',r.state?t('as.'+r.state):'-',r.inZ.map(i=>typeLabel(i.type)).join(', ')||'-',r.v?t('ar.'+r.v):'-']));
+  const acts=rows.filter(r=>r.v);
+  const p4=(acts.length?acts.map(r=>{ const weak=(r.v==='C'||r.v==='Cclear'); return `<div class="hint"><b>H${r.x.h} &middot; ${r.x.z}</b> ${t('ar.'+r.v)}${r.cl.length?`<br>${t('p.moveout',{z:r.x.z})} <b>${r.cl.map(i=>typeLabel(i.type)).join(', ')}</b>`:''}<br><small>${esc(weak?r.x.weak:r.x.strong)}</small></div>`; }).join(''):`<div class="hint">${t('p.auditnone')}</div>`)+`<div class="hint"><small>${t('p.astronote')}</small></div>`;
+  const p5=`<div class="hint" style="min-height:14rem">${t('a.notesph')}</div><p class="rp-sm">${t('rp.disclaimer')}</p><p class="rp-sm">${esc(b.footer)} ${b.prep?'&middot; '+t('b.prep')+': '+esc(b.prep):''} &middot; ${t('rp.generated')}</p>`;
+  showReport(pg(1,t('s.birth'),p1)+pg(2,t('s.chart'),p2)+pg(3,t('a.p3'),p3)+pg(4,t('s.audit'),p4)+pg(5,t('a.p5'),p5));
 }
 const AS_STATES = ['strong','weak','afflicted'];
 function astroHouse(h){ P.astro=P.astro||{}; P.astro.houses=P.astro.houses||{}; return P.astro.houses[h] || (P.astro.houses[h]={state:'',planets:''}); }
@@ -1198,13 +1248,15 @@ function astroKundaliSvg(rows){
 }
 // Vastu map (right half): the real plan turned so EAST is at the top, North on the left, with the 12 house zones tinted.
 function astroMapImg(rows){
-  if(!M.closed) return '';
-  const S=420, c=M.getCentre(), W=M.cv.width, H=M.cv.height;
-  const keep=Object.assign({},M.show); Object.assign(M.show,{zones:false,labels:false,graha:false,marma:false,grid:false,brahma:false}); M.draw();
-  const cv=document.createElement('canvas'); cv.width=cv.height=S; const x=cv.getContext('2d'); x.fillStyle='#faf6ee'; x.fillRect(0,0,S,S);
-  const far=Math.max(Math.hypot(c[0],c[1]),Math.hypot(W-c[0],c[1]),Math.hypot(c[0],H-c[1]),Math.hypot(W-c[0],H-c[1])), k=(S/2)/far*0.98;
-  x.save(); x.translate(S/2,S/2); x.rotate(-(M.northDeg+90)*Math.PI/180); x.drawImage(M.cv,-c[0]*k,-c[1]*k,W*k,H*k); x.restore();
-  Object.assign(M.show,keep); M.draw();
+  // With no plot boundary yet, the 12 direction zones are still drawn (without the plan) so the directions are always visible.
+  const S=420, cv=document.createElement('canvas'); cv.width=cv.height=S; const x=cv.getContext('2d'); x.fillStyle='#faf6ee'; x.fillRect(0,0,S,S);
+  if(M.closed){
+    const c=M.getCentre(), W=M.cv.width, H=M.cv.height;
+    const keep=Object.assign({},M.show); Object.assign(M.show,{zones:false,labels:false,graha:false,marma:false,grid:false,brahma:false}); M.draw();
+    const far=Math.max(Math.hypot(c[0],c[1]),Math.hypot(W-c[0],c[1]),Math.hypot(c[0],H-c[1]),Math.hypot(W-c[0],H-c[1])), k=(S/2)/far*0.98;
+    x.save(); x.translate(S/2,S/2); x.rotate(-(M.northDeg+90)*Math.PI/180); x.drawImage(M.cv,-c[0]*k,-c[1]*k,W*k,H*k); x.restore();
+    Object.assign(M.show,keep); M.draw();
+  }
   const byZone={}; rows.forEach(r=>{ byZone[r.x.z]=r; }), tint={A:'#2e9a3a',Aopen:'#8fcf4a',B:'#d6392b',C:'#e0a800',Cclear:'#c9b94a','':null};
   ZONES.forEach((z,i)=>{ const b=i*22.5, a0=(b-11.25-180)*Math.PI/180, a1=(b+11.25-180)*Math.PI/180, am=(b-180)*Math.PI/180, r=byZone[z.c];
     if(r){ const col=tint[r.v]||(r.state?AV_COL[r.state]:null); if(col){ x.save(); x.globalAlpha=.30; x.fillStyle=col; x.beginPath(); x.moveTo(S/2,S/2); x.arc(S/2,S/2,S/2,a0,a1); x.closePath(); x.fill(); x.restore(); } }
@@ -1219,7 +1271,7 @@ function astroMapImg(rows){
   let h=`<h2>${t('s.audit')}</h2><p>${t('p.auditinfo')}</p>`;
   if(!M.closed) h+=`<div class="hint">${t('p.auditneed')}</div>`;
   h+=`<div style="display:flex;flex-wrap:wrap;gap:.8rem;align-items:flex-start"><div style="flex:1;min-width:15rem">${wmSvg(astroKundaliSvg(rows))}<div class="rp-sm" style="font-size:.8rem">${t('p.chartleft')}</div></div>
-    <div style="flex:1;min-width:15rem">${astroMapImg(rows) || `<div class="hint">${t('p.auditneed')}</div>`}<div class="rp-sm" style="font-size:.8rem">${t('p.chartright')}</div></div></div>`;
+    <div style="flex:1;min-width:15rem">${astroMapImg(rows)}${M.closed?'':`<div class="hint">${t('p.auditneed')}</div>`}<div class="rp-sm" style="font-size:.8rem">${t('p.chartright')}</div></div></div>`;
   h+=`<table class="ztab" style="margin-top:.6rem"><tr><td><b>H</b></td><td><b>${t('p.dir')}</b></td><td><b>${t('p.state')}</b></td><td><b>${t('p.inzone')}</b></td><td><b>${t('p.verdict')}</b></td></tr>${rows.map(r=>`<tr><td>H${r.x.h}</td><td>${r.x.z}</td><td>${r.state?t('as.'+r.state):'-'}</td><td>${r.inZ.map(i=>typeLabel(i.type)).join(', ')||'-'}</td><td>${r.v?`<span class="vb ${AV_CLS[r.v]}">${t('ar.'+r.v)}</span>`:'-'}</td></tr>`).join('')}</table>`;
   const acts=rows.filter(r=>r.v);
   h+=acts.length ? acts.map(r=>{ const weak=(r.v==='C'||r.v==='Cclear'), txt=weak?r.x.weak:r.x.strong;
