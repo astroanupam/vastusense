@@ -884,7 +884,7 @@ function renderPanel(){
   $('panel').innerHTML = PANELS[key] ? PANELS[key]()
     : `<h2>${t('s.'+sub.id)}</h2><div class="soonbox">${t('ui.soon',{n:sub.stage})}</div>`;
   $('panel').innerHTML += `<div style="margin-top:1rem"><button class="btn alt" onclick="nextStep()">${t('ui.next')} &rsaquo;</button></div>`;
-  document.querySelector('.layout').classList.toggle('wide', (key==='lib/classic' && libView.i!==null) || key==='astro/audit' || key==='astro/birth');
+  document.querySelector('.layout').classList.toggle('wide', (key==='lib/classic' && libView.i!==null) || key==='astro/audit' || key==='astro/birth' || key==='astro/chart');
 }
 
 /* ---------- files ---------- */
@@ -1141,7 +1141,10 @@ function chartPanel(){
   if(res.err) return h+`<div class="hint">${t('c.badtz')}</div>`;
   const a=P.astro, notes=[]; if(res.fallback) notes.push(t('c.fallback')); if(res.nodeFallback) notes.push(t('c.nodenote')); if(res.ayFallback) notes.push('Yukteshwar: Lahiri used.');
   h+=`<div class="hint"><b>${esc(a.name||'')}</b> ${t('c.utc')} ${new Date(res.utc).toISOString().replace('T',' ').slice(0,19)} &middot; ${t('c.ayan')} ${dms(res.ay)}<br><b>${t('c.asc')}:</b> ${RASHI[res.asc.sign]} ${dms(res.asc.deg)} &middot; ${res.asc.nak}</div>`;
-  h+=wmSvg(astroChartSvg(res))+`<div class="rp-sm" style="font-size:.8rem">${t('p.chartleft')}</div>`;
+  // Birth chart (left) and the Vastu plan turned East-up with the 12 house zones (right), side by side. Planets come from this calculation.
+  const rows=astroAudit().map(r=>({...r, planets:GRAHAS.filter(g=>res.pos[g].house===r.x.h).map(g=>GAB[g]).join(' ')})), mp=astroMapImg(rows);
+  h+=`<div style="display:flex;flex-wrap:wrap;gap:.8rem;align-items:flex-start"><div style="flex:1;min-width:15rem">${wmSvg(astroChartSvg(res))}<div class="rp-sm" style="font-size:.8rem">${t('p.chartleft')}</div></div>
+    <div style="flex:1;min-width:15rem">${mp||`<div class="hint">${t('p.auditneed')}</div>`}<div class="rp-sm" style="font-size:.8rem">${t('p.chartright')}</div></div></div>`;
   h+=`<table class="ztab" style="margin-top:.6rem"><tr><td><b>${t('c.planet')}</b></td><td><b>${t('c.sign')}</b></td><td><b>${t('c.deg')}</b></td><td><b>${t('c.house')}</b></td><td><b>${t('c.nak')}</b></td></tr>`
     + `<tr><td>${t('c.asc')}</td><td>${RASHI[res.asc.sign]}</td><td>${dms(res.asc.deg)}</td><td>1</td><td>${res.asc.nak}</td></tr>`
     + GRAHAS.map(g=>{ const p=res.pos[g]; return `<tr><td>${t('gr.'+g)}${p.retro?' (R)':''}</td><td>${RASHI[p.sign]}</td><td>${dms(p.deg)}</td><td>${p.house}</td><td>${p.nak}-${p.pada}</td></tr>`; }).join('')+`</table>`;
@@ -1206,7 +1209,8 @@ function astroMapImg(rows){
   ZONES.forEach((z,i)=>{ const b=i*22.5, a0=(b-11.25-180)*Math.PI/180, a1=(b+11.25-180)*Math.PI/180, am=(b-180)*Math.PI/180, r=byZone[z.c];
     if(r){ const col=tint[r.v]||(r.state?AV_COL[r.state]:null); if(col){ x.save(); x.globalAlpha=.30; x.fillStyle=col; x.beginPath(); x.moveTo(S/2,S/2); x.arc(S/2,S/2,S/2,a0,a1); x.closePath(); x.fill(); x.restore(); } }
     x.strokeStyle='#0006'; x.lineWidth=1; x.beginPath(); x.moveTo(S/2,S/2); x.lineTo(S/2+Math.cos(a0)*S/2,S/2+Math.sin(a0)*S/2); x.stroke();
-    x.font='bold 13px sans-serif'; x.textAlign='center'; x.fillStyle=r?'#000':'#777'; x.lineWidth=3; x.strokeStyle='#fffc'; const tx=S/2+Math.cos(am)*S*0.42, ty=S/2+Math.sin(am)*S*0.42, lab=r?'H'+r.x.h+' '+z.c:z.c; x.strokeText(lab,tx,ty); x.fillText(lab,tx,ty); });
+    x.font='bold 13px sans-serif'; x.textAlign='center'; x.fillStyle=r?'#000':'#777'; x.lineWidth=3; x.strokeStyle='#fffc'; const tx=S/2+Math.cos(am)*S*0.42, ty=S/2+Math.sin(am)*S*0.42, lab=r?'H'+r.x.h+' '+z.c:z.c; x.strokeText(lab,tx,ty); x.fillText(lab,tx,ty);
+    if(r&&r.planets){ x.font='bold 11px sans-serif'; x.strokeText(r.planets,tx,ty+13); x.fillText(r.planets,tx,ty+13); } });
   x.font='bold 15px sans-serif'; x.fillStyle='#222'; x.textAlign='center'; x.fillText('E',S/2,16); x.fillText('W',S/2,S-6); x.fillText('N',10,S/2+5); x.fillText('S',S-10,S/2+5);
   x.save(); x.font='bold 11px sans-serif'; x.textAlign='right'; x.fillStyle='#222'; x.globalAlpha=.7; x.fillText('VASTUSENSE BY ANOOPAM',S-6,S-22); x.restore();
   return `<img src="${cv.toDataURL('image/png')}" style="width:100%;max-width:26rem;border:1px solid #ccc" alt="">`;
