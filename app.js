@@ -54,9 +54,7 @@ function sanitizeProject(d){
   P2.userRules=sRules(s.userRules,'rule'); P2.userRemedies=sRules(s.userRemedies,'remedy'); P2.brand=sBrand(s.brand);
   P2.rpSel={}; RP_SECTIONS.forEach(k=>{ if(s.rpSel&&s.rpSel[k]===false) P2.rpSel[k]=false; });
   P2.cert={name:sStr((s.cert||{}).name,200), ok:(s.cert||{}).ok===true};
-  const as=(s.astro&&typeof s.astro==='object')?s.astro:{};
-  P2.astro={name:sStr(as.name,120), date:/^\d{4}-\d{2}-\d{2}$/.test(as.date)?as.date:'', time:/^\d{2}:\d{2}$/.test(as.time)?as.time:'', place:sStr(as.place,160), asc:sEnum(as.asc,RASHI,''), dasha:sStr(as.dasha,80), houses:{}};
-  for(let h=1;h<=12;h++){ const o=(as.houses&&typeof as.houses==='object'&&as.houses[h])||{}; P2.astro.houses[h]={state:sEnum(o.state,['strong','weak','afflicted'],''), planets:sStr(o.planets,80)}; }
+  P2.astro=sAstro(s.astro);
   const map={northDeg:sNum(m.northDeg,-360,360,0), closed:m.closed===true, pxPerM:sNum(m.pxPerM,0,1e6,0), zsys:sEnum(m.zsys,[8,16,24,32],16)};
   map.poly=sPts(m.poly,0,500)||[]; map.centre=sPt(m.centre);
   map.devata=(Array.isArray(m.devata)&&m.devata.length===81)?m.devata.map(v=>sStr(v,60)):null;
@@ -253,6 +251,7 @@ const PANELS = {
   'about/us': ()=>aboutPanel(),
   'astro/birth': ()=>birthPanel(),
   'astro/graha': ()=>grahaPanel(),
+  'astro/chart': ()=>chartPanel(),
   'astro/houses': ()=>housesPanel(),
   'astro/audit': ()=>auditPanel(),
   'map/alloc': ()=>allocPanel(),
@@ -885,7 +884,7 @@ function renderPanel(){
   $('panel').innerHTML = PANELS[key] ? PANELS[key]()
     : `<h2>${t('s.'+sub.id)}</h2><div class="soonbox">${t('ui.soon',{n:sub.stage})}</div>`;
   $('panel').innerHTML += `<div style="margin-top:1rem"><button class="btn alt" onclick="nextStep()">${t('ui.next')} &rsaquo;</button></div>`;
-  document.querySelector('.layout').classList.toggle('wide', (key==='lib/classic' && libView.i!==null) || key==='astro/audit');
+  document.querySelector('.layout').classList.toggle('wide', (key==='lib/classic' && libView.i!==null) || key==='astro/audit' || key==='astro/birth');
 }
 
 /* ---------- files ---------- */
@@ -932,11 +931,12 @@ function ctxRoomType(i,k){ if(!ROOM_TYPES.includes(k)||!M.rooms[i]) return; M.ro
 function ctxDel(kind,i){ if(kind==='room') M.rooms.splice(i,1); else if(kind==='feat') M.feats.splice(i,1); else if(kind==='anno'){ M.annoPush(); M.annos.splice(i,1); M.annoSel=-1; } ctxClose(); M.draw(); M.changed(); }
 function ctxPlace(kind,k){
   ctxClose(); const p=ctxPt; M.mode='view'; M.roomPts=[]; M.featPts=[];
-  if(kind==='room'){ if(!ROOM_TYPES.includes(k)) return; M.curType=k; M.roomPts=[p]; M.mode='room'; }
+  // A room is placed at once as a labelled square (4 m a side when the scale is set, else 8% of the map width). Its corners can then be redrawn if needed.
+  if(kind==='room'){ if(!ROOM_TYPES.includes(k)) return; const h=(M.pxPerM?4*M.pxPerM:M.cv.width*0.08)/2; M.rooms.push({type:k, pts:[[p[0]-h,p[1]-h],[p[0]+h,p[1]-h],[p[0]+h,p[1]+h],[p[0]-h,p[1]+h]]}); }
   else { if(!FEAT_OK().includes(k)) return; if(LINE_KINDS.includes(k)){ M.featKind=k; M.featPts=[p]; M.mode='feat'; } else M.feats.push({kind:k, pts:[p]}); }
   M.draw(); M.changed();
 }
-function ctxText(){ const p=ctxPt; ctxClose(); const s=prompt(t('p.texthere')); if(s&&sStr(s,500)){ M.annoPush(); M.annos.push({type:'text', pts:[p], text:sStr(s,500), stroke:M.annoStyle.stroke, size:M.annoStyle.size}); M.draw(); M.changed(); } }
+function ctxText(){ const p=ctxPt; ctxClose(); askText(t('p.texthere'),'',s=>{ s=sStr(s,500); if(s){ M.annoPush(); M.annos.push({type:'text', pts:[p], text:s, stroke:M.annoStyle.stroke, size:M.annoStyle.size}); M.draw(); M.changed(); } }); }
 document.addEventListener('click', e=>{ if(!(e.target.closest&&e.target.closest('#ctxmenu'))) ctxClose(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') ctxClose(); });
 window.addEventListener('scroll', ctxClose, {passive:true});
@@ -973,9 +973,180 @@ function saveMapImage(){ M.draw(); M.cv.toBlob(b=>{ if(!b) return; const a=docum
 
 /* ---------- AstroVastu ---------- */
 function grahaSync(){ M.grahaLabels = {}; for(const d in GRAHA_DIR) M.grahaLabels[d] = t('gr.'+GRAHA_DIR[d]); }
+// One validator per birth-data field. Used while typing (astroSet) and when a project file is loaded (sAstro).
+const validTZ = z => { try{ new Intl.DateTimeFormat('en',{timeZone:z}); return /^[A-Za-z0-9_+\-\/]{1,64}$/.test(z); }catch(e){ return false; } };
+const isoDate = v => { const m=/^(\d{4})-(\d{2})-(\d{2})$/.exec(v||''); if(!m) return ''; const d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3])); return (d.getUTCFullYear()===+m[1]&&d.getUTCMonth()===+m[2]-1&&d.getUTCDate()===+m[3]&&+m[1]>=1600&&+m[1]<=2200)?v:''; };
+const ASTRO_SPEC = {
+  name:v=>sStr(v,120), gender:v=>sEnum(v,['f','m','o'],''), rating:v=>sEnum(v,['AA','A','B','C','DD','X','XX'],''), date:v=>isoDate(v),
+  // out-of-range numbers are refused, not clamped
+  hr:v=>{ const n=+v; return v!==''&&isFinite(n)&&n>=0&&n<=23?String(Math.floor(n)):''; }, mi:v=>{ const n=+v; return v!==''&&isFinite(n)&&n>=0&&n<=59?String(Math.floor(n)):''; }, se:v=>{ const n=+v; return v!==''&&isFinite(n)&&n>=0&&n<=59?String(Math.floor(n)):'0'; },
+  h12:v=>v===true||v==='true', country:v=>/^[A-Z]{2}$/.test(v)?v:'', state:v=>sStr(v,100), city:v=>sStr(v,100),
+  lat:v=>{ const n=+v; return v!==''&&isFinite(n)&&n>=-90&&n<=90?String(n):''; }, lon:v=>{ const n=+v; return v!==''&&isFinite(n)&&n>=-180&&n<=180?String(n):''; },
+  tz:v=>validTZ(v)?v:'', manual:v=>v===true||v==='true', moff:v=>/^[+-]\d{2}:\d{2}$/.test(v)?v:'',
+  ayan:v=>sEnum(v,['lahiri','raman','kp','fb','yuk','custom'],'lahiri'), ayc:v=>sNumStr(v), node:v=>sEnum(v,['mean','true'],'mean'), hsys:v=>sEnum(v,['whole','equal','sripati','chalit'],'whole'),
+  notes:v=>sStr(v,1000), asc:v=>sEnum(v,RASHI,''), dasha:v=>sStr(v,80)
+};
+function sAstro(a){
+  a = (a&&typeof a==='object') ? a : {}; const o={};
+  for(const k in ASTRO_SPEC) o[k]=ASTRO_SPEC[k](typeof a[k]==='boolean'?a[k]:(typeof a[k]==='number'?String(a[k]):(typeof a[k]==='string'?a[k]:'')));
+  if(!o.city && typeof a.place==='string') o.city=sStr(a.place,100);           // older projects stored one 'place' text
+  o.houses={}; for(let h=1;h<=12;h++){ const x=(a.houses&&typeof a.houses==='object'&&a.houses[h])||{}; o.houses[h]={state:sEnum(x.state,['strong','weak','afflicted'],''), planets:sStr(x.planets,80)}; }
+  return o;
+}
 function astroSet(k,v){
-  P.astro = P.astro||{}; v = String(v||'');
-  P.astro[k] = k==='date' ? (/^\d{4}-\d{2}-\d{2}$/.test(v)?v:'') : k==='time' ? (/^\d{2}:\d{2}$/.test(v)?v:'') : k==='asc' ? sEnum(v,RASHI,'') : sStr(v, k==='place'?160:k==='dasha'?80:120);
+  if(!ASTRO_SPEC[k]) return; P.astro = P.astro||{};
+  P.astro[k] = ASTRO_SPEC[k](typeof v==='boolean'?v:String(v==null?'':v));
+}
+// ---- time zone: UTC offset at the birth instant, from the browser's time-zone database (history and daylight saving included)
+function tzOffMs(tz, utcMs){
+  const p={}; new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'}).formatToParts(new Date(utcMs)).forEach(x=>{ p[x.type]=x.value; });
+  return Date.UTC(+p.year,+p.month-1,+p.day,+p.hour,+p.minute,+p.second)-Math.floor(utcMs/1000)*1000;
+}
+function localToUtc(tz,y,m,d,H,Mi,S){
+  const guess=Date.UTC(y,m-1,d,H,Mi,S); let off=tzOffMs(tz,guess), utc=guess-off; const off2=tzOffMs(tz,utc); if(off2!==off){ utc=guess-off2; off=off2; } return {utc, off};
+}
+const fmtOff = ms => { const m=Math.round(ms/60000), s=m<0?'-':'+', a=Math.abs(m); return s+String(Math.floor(a/60)).padStart(2,'0')+':'+String(a%60).padStart(2,'0'); };
+function birthCheckText(){
+  const a=P.astro||{}; if(!a.date||a.hr===''||a.hr===undefined||a.mi===''||a.mi===undefined) return t('b.fill');
+  const [y,m,d]=a.date.split('-').map(Number), H=+a.hr, Mi=+a.mi, S=+(a.se||0), when=`${String(H).padStart(2,'0')}:${String(Mi).padStart(2,'0')}:${String(S).padStart(2,'0')}`;
+  let off, utc, dst='';
+  if(a.manual){ if(!a.moff) return t('b.fill'); const sg=a.moff[0]==='-'?-1:1, mins=sg*(+a.moff.slice(1,3)*60+ +a.moff.slice(4,6)); off=mins*60000; utc=Date.UTC(y,m-1,d,H,Mi,S)-off; }
+  else { if(!a.tz) return t('b.badtz'); const r=localToUtc(a.tz,y,m,d,H,Mi,S); off=r.off; utc=r.utc; const j=tzOffMs(a.tz,Date.UTC(y,0,1)), l=tzOffMs(a.tz,Date.UTC(y,6,1)); dst=t(off>Math.min(j,l)?'b.dst':'b.std'); }
+  const u=new Date(utc).toISOString().replace('T',' ').slice(0,19);
+  return a.manual ? t('b.resm',{t:when, o:fmtOff(off), u}) : t('b.res',{t:when, z:a.tz, o:fmtOff(off), d:dst, u});
+}
+function birthUpdate(){ const e=$('bchk'); if(e) e.textContent=birthCheckText(); }
+let _countries={};
+function countryList(){
+  if(_countries[LANG]) return _countries[LANG]; const out=[]; let dn=null; try{ dn=new Intl.DisplayNames([LANG],{type:'region'}); }catch(e){}
+  if(dn) for(let a=65;a<=90;a++) for(let b=65;b<=90;b++){ const c=String.fromCharCode(a,b); let n=''; try{ n=dn.of(c); }catch(e){} if(n && n!==c) out.push([c,n]); }
+  return _countries[LANG]=out.sort((x,y)=>x[1].localeCompare(y[1],LANG));
+}
+const tzList = () => { try{ return Intl.supportedValuesOf('timeZone'); }catch(e){ return ['Asia/Kolkata','Asia/Dubai','Asia/Karachi','Asia/Dhaka','Asia/Kathmandu','Asia/Colombo','Europe/London','Europe/Paris','Europe/Rome','Europe/Madrid','America/New_York','America/Chicago','America/Los_Angeles','America/Toronto','Australia/Sydney','Africa/Johannesburg','UTC']; } };
+function birthDateShow(){ const v=(P.astro||{}).date; return v?v.split('-').reverse().join('/'):''; }
+function birthDateSet(s){
+  s=String(s||'').trim(); if(!s){ astroSet('date',''); birthUpdate(); return; }
+  const m=/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/.exec(s), iso=m?`${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`:'';
+  astroSet('date',iso); const el=$('bdate'); if(el){ el.style.borderColor=P.astro.date?'':'#c0392b'; if(P.astro.date) el.value=birthDateShow(); } if(!P.astro.date) toast('b.baddate'); birthUpdate();
+}
+function birthHour12(h24){ return h24===''||h24===undefined ? '' : String((+h24%12)||12); }
+function birthTimeSet(k,v){
+  const a=P.astro=P.astro||{};
+  if(k==='hr' && a.h12){ let h=+v; if(!(h>=1&&h<=12)){ astroSet('hr',''); birthUpdate(); return; } const pm=(a.ampm==='pm'); astroSet('hr',String((h%12)+(pm?12:0))); }
+  else astroSet(k,v);
+  birthUpdate();
+}
+function birthAmpm(v){ const a=P.astro=P.astro||{}; a.ampm=v==='pm'?'pm':'am'; if(a.hr!==''&&a.hr!==undefined){ const h=(+a.hr)%12; astroSet('hr',String(h+(a.ampm==='pm'?12:0))); } birthUpdate(); }
+function birthMode(h12){ astroSet('h12',h12); const a=P.astro; if(h12) a.ampm = (+a.hr>=12)?'pm':'am'; renderPanel(); }
+function birthKeepPlace(on){ const a=P.astro||{}; if(on) store.set('vs.place',JSON.stringify({country:a.country||'',state:a.state||'',city:a.city||'',lat:a.lat||'',lon:a.lon||'',tz:a.tz||''})); else store.set('vs.place',''); }
+function birthClear(){ if(confirm(t('p.confirmclear'))){ const h=(P.astro||{}).houses; P.astro={houses:h}; renderPanel(); } }
+/* ---------- City lookup (built-in list, see CITIES in data.js) ---------- */
+const normCity = s => String(s||'').normalize('NFD').replace(/[̀-ͯ]/g,'').trim().toLowerCase();
+// The list is ordered by population, so the biggest match comes first.
+function citySearch(q,max){
+  const k=normCity(q); if(k.length<2) return []; const db=cityDB(), out=[];
+  for(let i=0;i<db.length&&out.length<max;i++){ const c=db[i]; if(!c.k) c.k=normCity(c.n); if(c.k.startsWith(k)) out.push(c); }
+  return out;
+}
+function cityApply(m){
+  const a=P.astro=P.astro||{}; a.city=sStr(m.n,100); a.country=ASTRO_SPEC.country(m.c); a.state=sStr(m.s,100); a.lat=ASTRO_SPEC.lat(m.lat); a.lon=ASTRO_SPEC.lon(m.lon); if(validTZ(m.tz)){ a.tz=m.tz; a.manual=false; }
+  renderPanel(); toast('b.cityok');
+}
+function citySuggest(v){
+  const box=$('citysug'); if(!box) return; const res=citySearch(v,12); window._csug=res;
+  box.innerHTML=res.map((c,i)=>`<button class="btn alt" style="display:block;width:100%;text-align:start;margin:2px 0" onclick="cityApply(_csug[${i}])">${esc(c.n)}${c.s?', '+esc(c.s):''} (${esc(c.c)})</button>`).join('');
+}
+function birthCity(v){
+  astroSet('city',v); const a=P.astro, k=normCity(v); if(!k){ birthUpdate(); return; }
+  const hit=citySearch(v,50).filter(c=>normCity(c.n)===k), m=hit.find(c=>c.c===a.country)||hit[0];
+  if(m) cityApply(m); else birthUpdate();
+}
+
+/* ---------- Birth chart calculation ----------
+   Low-precision formulas worked out in the browser: Sun, Moon and planets from mean orbital elements (Paul Schlyter's published method) with the main
+   Moon, Jupiter and Saturn corrections; mean lunar node; ascendant from sidereal time; ayanamsha from a fixed epoch value plus precession. */
+const DEG = Math.PI/180, nrm360 = x => ((x%360)+360)%360;
+const EL = {   // [value at d=0, daily change]; d = days since 1999-12-31 00:00 UT
+  Mercury:{N:[48.3313,3.24587e-5],i:[7.0047,5e-8],w:[29.1241,1.01444e-5],a:0.387098,e:[0.205635,5.59e-10],M:[168.6562,4.0923344368]},
+  Venus:{N:[76.6799,2.4659e-5],i:[3.3946,2.75e-8],w:[54.891,1.38374e-5],a:0.72333,e:[0.006773,-1.302e-9],M:[48.0052,1.6021302244]},
+  Mars:{N:[49.5574,2.11081e-5],i:[1.8497,-1.78e-8],w:[286.5016,2.92961e-5],a:1.523688,e:[0.093405,2.516e-9],M:[18.6021,0.5240207766]},
+  Jupiter:{N:[100.4542,2.76854e-5],i:[1.303,-1.557e-7],w:[273.8777,1.64505e-5],a:5.20256,e:[0.048498,4.469e-9],M:[19.895,0.0830853001]},
+  Saturn:{N:[113.6634,2.3898e-5],i:[2.4886,-1.081e-7],w:[339.3939,2.97661e-5],a:9.55475,e:[0.055546,-9.499e-9],M:[316.967,0.0334442282]},
+  Sun:{N:0,i:0,w:[282.9404,4.70935e-5],a:1,e:[0.016709,-1.151e-9],M:[356.047,0.9856002585]},
+  Moon:{N:[125.1228,-0.0529538083],i:5.1454,w:[318.0634,0.1643573223],a:60.2666,e:0.0549,M:[115.3654,13.0649929509]}
+};
+function orbit(name,d){
+  const o=EL[name], f=p=>Array.isArray(p)?p[0]+p[1]*d:p, N=f(o.N)*DEG, i=f(o.i)*DEG, w=f(o.w)*DEG, e=f(o.e), M=nrm360(f(o.M))*DEG;
+  let E=M+e*Math.sin(M)*(1+e*Math.cos(M)); for(let k=0;k<8;k++) E-=(E-e*Math.sin(E)-M)/(1-e*Math.cos(E));
+  const xv=o.a*(Math.cos(E)-e), yv=o.a*Math.sqrt(1-e*e)*Math.sin(E), v=Math.atan2(yv,xv), r=Math.hypot(xv,yv), u=v+w;
+  return {x:r*(Math.cos(N)*Math.cos(u)-Math.sin(N)*Math.sin(u)*Math.cos(i)), y:r*(Math.sin(N)*Math.cos(u)+Math.cos(N)*Math.sin(u)*Math.cos(i)), r, Mdeg:nrm360(f(o.M)), wdeg:nrm360(f(o.w)), Ndeg:nrm360(f(o.N))};
+}
+function tropLongs(d){
+  const S=orbit('Sun',d), xs=S.x, ys=S.y, out={};
+  out.Sun=nrm360(Math.atan2(ys,xs)/DEG);
+  // Moon with its main periodic corrections
+  const Mo=orbit('Moon',d); let lm=Math.atan2(Mo.y,Mo.x)/DEG; const Ms=S.Mdeg, Mm=Mo.Mdeg, Lm=Mo.Mdeg+Mo.wdeg+Mo.Ndeg, Ls=S.Mdeg+S.wdeg, D=Lm-Ls, F=Lm-Mo.Ndeg, sn=x=>Math.sin(x*DEG);
+  lm += -1.274*sn(Mm-2*D)+0.658*sn(2*D)-0.186*sn(Ms)-0.059*sn(2*Mm-2*D)-0.057*sn(Mm-2*D+Ms)+0.053*sn(Mm+2*D)+0.046*sn(2*D-Ms)+0.041*sn(Mm-Ms)-0.035*sn(D)-0.031*sn(Mm+Ms)-0.015*sn(2*F-2*D)+0.011*sn(Mm-4*D);
+  out.Moon=nrm360(lm);
+  const Mj=orbit('Jupiter',d).Mdeg, Msa=orbit('Saturn',d).Mdeg, cs=x=>Math.cos(x*DEG);
+  ['Mercury','Venus','Mars','Jupiter','Saturn'].forEach(n=>{ const P_=orbit(n,d); let L=Math.atan2(P_.y+ys,P_.x+xs)/DEG;
+    if(n==='Jupiter') L+=-0.332*sn(2*Mj-5*Msa-67.6)-0.056*sn(2*Mj-2*Msa+21)+0.042*sn(3*Mj-5*Msa+21)-0.036*sn(Mj-2*Msa)+0.022*cs(Mj-Msa)+0.023*sn(2*Mj-3*Msa+52)-0.016*sn(Mj-5*Msa-69);
+    if(n==='Saturn') L+=0.812*sn(2*Mj-5*Msa-67.6)-0.229*cs(2*Mj-4*Msa-2)+0.119*sn(Mj-2*Msa-3)+0.046*sn(2*Mj-6*Msa-69)+0.014*sn(Mj-3*Msa+32);
+    out[n]=nrm360(L); });
+  out.Rahu=Mo.Ndeg; out.Ketu=nrm360(Mo.Ndeg+180);
+  return out;
+}
+const AYAN0 = {lahiri:[22.460148,1900], raman:[21.014442,1900], kp:[22.363889,1900], fb:[24.042044,1950]};   // value in degrees at the given year
+function ayanamsha(jd,a){
+  const yr=2000+(jd-2451545)/365.25, rate=0.01396971;
+  if(a.ayan==='custom'){ const v=parseFloat(a.ayc); return isFinite(v)? v+rate*(yr-2000) : null; }
+  const e=AYAN0[a.ayan]||AYAN0.lahiri; return e[0]+rate*(yr-e[1]);
+}
+const NAKS = ['Ashwini','Bharani','Krittika','Rohini','Mrigashira','Ardra','Punarvasu','Pushya','Ashlesha','Magha','Purva Phalguni','Uttara Phalguni','Hasta','Chitra','Swati','Vishakha','Anuradha','Jyeshtha','Mula','Purva Ashadha','Uttara Ashadha','Shravana','Dhanishta','Shatabhisha','Purva Bhadrapada','Uttara Bhadrapada','Revati'];
+const GRAHAS = ['Sun','Moon','Mars','Mercury','Jupiter','Venus','Saturn','Rahu','Ketu'], GAB = {Sun:'Su',Moon:'Mo',Mars:'Ma',Mercury:'Me',Jupiter:'Ju',Venus:'Ve',Saturn:'Sa',Rahu:'Ra',Ketu:'Ke'};
+function birthUtc(){
+  const a=P.astro||{}; if(!a.date||a.hr===''||a.hr===undefined||a.mi===''||a.mi===undefined) return null;
+  const [y,m,d]=a.date.split('-').map(Number), H=+a.hr, Mi=+a.mi, S=+(a.se||0);
+  if(a.manual){ if(!a.moff) return null; const sg=a.moff[0]==='-'?-1:1, off=sg*(+a.moff.slice(1,3)*60+ +a.moff.slice(4,6))*60000; return {utc:Date.UTC(y,m-1,d,H,Mi,S)-off, off}; }
+  if(!a.tz) return null; return localToUtc(a.tz,y,m,d,H,Mi,S);
+}
+function astroCalc(){
+  const a=P.astro||{}, u=birthUtc(), lat=parseFloat(a.lat), lon=parseFloat(a.lon);
+  if(!u || !isFinite(lat) || !isFinite(lon) || a.lat===''||a.lon==='') return null;
+  const jd=u.utc/86400000+2440587.5, d=jd-2451543.5, ay=ayanamsha(jd,a); if(ay===null) return {err:'ayc'};
+  const trop=tropLongs(d), trop2=tropLongs(d+0.05), pos={};
+  GRAHAS.forEach(g=>{ const s=nrm360(trop[g]-ay); let retro=(g==='Rahu'||g==='Ketu'); if(!retro&&g!=='Sun'&&g!=='Moon'){ let dl=trop2[g]-trop[g]; if(dl>180)dl-=360; if(dl<-180)dl+=360; retro=dl<0; } pos[g]={lon:s, sign:Math.floor(s/30), deg:s%30, retro, nak:NAKS[Math.floor(s/(360/27))], pada:Math.floor((s%(360/27))/((360/27)/4))+1}; });
+  const T=(jd-2451545)/36525, eps=(23.4392911-0.0130042*T)*DEG, ramc=nrm360(280.46061837+360.98564736629*(jd-2451545)+lon)*DEG;
+  const asc=nrm360(Math.atan2(Math.cos(ramc), -(Math.sin(ramc)*Math.cos(eps)+Math.tan(lat*DEG)*Math.sin(eps)))/DEG-ay), lsign=Math.floor(asc/30);
+  const equal=(a.hsys==='equal');
+  GRAHAS.forEach(g=>{ const p=pos[g]; p.house = equal ? Math.floor(nrm360(p.lon-asc)/30)+1 : ((p.sign-lsign+12)%12)+1; });
+  return {pos, asc:{lon:asc, sign:lsign, deg:asc%30, nak:NAKS[Math.floor(asc/(360/27))]}, ay, utc:u.utc, fallback:(a.hsys==='sripati'||a.hsys==='chalit'), nodeFallback:a.node==='true', ayFallback:a.ayan==='yuk'};
+}
+const dms = x => { const d=Math.floor(x), m=Math.floor((x-d)*60); return d+'°'+String(m).padStart(2,'0')+"'"; };
+function astroChartSvg(res){
+  const byH={}; GRAHAS.forEach(g=>{ const h=res.pos[g].house; (byH[h]=byH[h]||[]).push(GAB[g]+(res.pos[g].retro&&g!=='Rahu'&&g!=='Ketu'?'(R)':'')); });
+  const body=Object.keys(KPTS).map(h=>{ const p=KPTS[h], c=kcen(p), sn=((res.asc.sign+(h-1))%12)+1, pl=(byH[h]||[]), line1=pl.slice(0,3).join(' '), line2=pl.slice(3).join(' ');
+    return `<polygon points="${p.map(q=>q.join(',')).join(' ')}" fill="${h==1?'#fff3df':'#fff'}" stroke="#555"/><text x="${c[0]}" y="${c[1]-8}" font-size="9" text-anchor="middle" fill="#777">${sn}</text><text x="${c[0]}" y="${c[1]+4}" font-size="10" font-weight="700" text-anchor="middle">${esc(line1)}</text><text x="${c[0]}" y="${c[1]+15}" font-size="10" font-weight="700" text-anchor="middle">${esc(line2)}</text>`; }).join('');
+  return `<svg viewBox="0 0 300 300" style="width:100%;max-width:26rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" role="img">${body}</svg>`;
+}
+function chartPanel(){
+  const res=astroCalc(); let h=`<h2>${t('s.chart')}</h2><p>${t('c.info')}</p>`;
+  if(!res) return h+`<div class="hint">${t('c.need')}</div>`;
+  if(res.err) return h+`<div class="hint">${t('c.badtz')}</div>`;
+  const a=P.astro, notes=[]; if(res.fallback) notes.push(t('c.fallback')); if(res.nodeFallback) notes.push(t('c.nodenote')); if(res.ayFallback) notes.push('Yukteshwar: Lahiri used.');
+  h+=`<div class="hint"><b>${esc(a.name||'')}</b> ${t('c.utc')} ${new Date(res.utc).toISOString().replace('T',' ').slice(0,19)} &middot; ${t('c.ayan')} ${dms(res.ay)}<br><b>${t('c.asc')}:</b> ${RASHI[res.asc.sign]} ${dms(res.asc.deg)} &middot; ${res.asc.nak}</div>`;
+  h+=wmSvg(astroChartSvg(res))+`<div class="rp-sm" style="font-size:.8rem">${t('p.chartleft')}</div>`;
+  h+=`<table class="ztab" style="margin-top:.6rem"><tr><td><b>${t('c.planet')}</b></td><td><b>${t('c.sign')}</b></td><td><b>${t('c.deg')}</b></td><td><b>${t('c.house')}</b></td><td><b>${t('c.nak')}</b></td></tr>`
+    + `<tr><td>${t('c.asc')}</td><td>${RASHI[res.asc.sign]}</td><td>${dms(res.asc.deg)}</td><td>1</td><td>${res.asc.nak}</td></tr>`
+    + GRAHAS.map(g=>{ const p=res.pos[g]; return `<tr><td>${t('gr.'+g)}${p.retro?' (R)':''}</td><td>${RASHI[p.sign]}</td><td>${dms(p.deg)}</td><td>${p.house}</td><td>${p.nak}-${p.pada}</td></tr>`; }).join('')+`</table>`;
+  h+=`<div class="hint"><small>${t('c.retro')}${notes.length?'<br>'+notes.map(esc).join('<br>'):''}</small></div>`;
+  h+=`<button class="btn" onclick="astroChartCopy()">${t('c.copy')}</button><div class="hint"><small>${t('p.astronote')}</small></div>`;
+  return h;
+}
+function astroChartCopy(){
+  const res=astroCalc(); if(!res||res.err) return; const a=P.astro; a.asc=RASHI[res.asc.sign]; a.houses=a.houses||{};
+  for(let h=1;h<=12;h++){ a.houses[h]=a.houses[h]||{state:'',planets:''}; a.houses[h].planets=GRAHAS.filter(g=>res.pos[g].house===h).map(g=>GAB[g]).join(' '); }
+  toast('c.copied');
 }
 const AS_STATES = ['strong','weak','afflicted'];
 function astroHouse(h){ P.astro=P.astro||{}; P.astro.houses=P.astro.houses||{}; return P.astro.houses[h] || (P.astro.houses[h]={state:'',planets:''}); }
@@ -1007,10 +1178,11 @@ function astroAudit(){
 const AV_CLS = {A:'v-prefer',Aopen:'v-ok',B:'v-avoid',C:'v-ok',Cclear:'v-neutral','':'v-neutral'};
 const AV_COL = {strong:'#b7e1b0',weak:'#ffe08a',afflicted:'#f1a9a0','':'#eee'};
 // North Indian chart (left half of the side-by-side view): 12 regions, house 1 at the top, counter-clockwise.
+const KPTS = (()=>{ const O=[150,150]; return {1:[O,[75,75],[150,0],[225,75]],2:[[0,0],[150,0],[75,75]],3:[[0,0],[75,75],[0,150]],4:[O,[75,75],[0,150],[75,225]],5:[[0,150],[75,225],[0,300]],6:[[0,300],[75,225],[150,300]],
+    7:[O,[75,225],[150,300],[225,225]],8:[[150,300],[225,225],[300,300]],9:[[300,300],[225,225],[300,150]],10:[O,[225,225],[300,150],[225,75]],11:[[300,150],[225,75],[300,0]],12:[[300,0],[225,75],[150,0]]}; })();
+const kcen = p => [p.reduce((s,q)=>s+q[0],0)/p.length, p.reduce((s,q)=>s+q[1],0)/p.length];
 function astroKundaliSvg(rows){
-  const O=[150,150], pts={1:[O,[75,75],[150,0],[225,75]],2:[[0,0],[150,0],[75,75]],3:[[0,0],[75,75],[0,150]],4:[O,[75,75],[0,150],[75,225]],5:[[0,150],[75,225],[0,300]],6:[[0,300],[75,225],[150,300]],
-    7:[O,[75,225],[150,300],[225,225]],8:[[150,300],[225,225],[300,300]],9:[[300,300],[225,225],[300,150]],10:[O,[225,225],[300,150],[225,75]],11:[[300,150],[225,75],[300,0]],12:[[300,0],[225,75],[150,0]]};
-  const cen=p=>[p.reduce((s,q)=>s+q[0],0)/p.length, p.reduce((s,q)=>s+q[1],0)/p.length];
+  const pts=KPTS, cen=kcen;
   const body=Object.keys(pts).map(h=>{ const r=rows[h-1], p=pts[h], c=cen(p), sub=(ASTRO_META[h][0]+(r.planets?': '+r.planets:'')).slice(0,24);
     return `<polygon points="${p.map(q=>q.join(',')).join(' ')}" fill="${AV_COL[r.state]}" stroke="#555"/><text x="${c[0]}" y="${c[1]}" font-size="14" font-weight="700" text-anchor="middle">H${h}</text><text x="${c[0]}" y="${c[1]+12}" font-size="8" text-anchor="middle" fill="#333">${esc(r.x.z)}</text><text x="${c[0]}" y="${c[1]+22}" font-size="7" text-anchor="middle" fill="#555">${esc(sub)}</text>`; }).join('');
   return `<svg viewBox="0 0 300 300" style="width:100%;max-width:26rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" role="img">${body}</svg>`;
@@ -1048,13 +1220,50 @@ function astroMapImg(rows){
 }
 
 function birthPanel(){
-  const a=P.astro||{};
+  const a=P.astro=P.astro||{}, h12=!!a.h12;
+  if(!a.tz && !a.manual){ const dp=safeJSON(store.get('vs.place','')||'null'); if(dp){ ['country','state','city','lat','lon','tz'].forEach(k=>{ if(!a[k]) a[k]=ASTRO_SPEC[k](dp[k]); }); } if(!a.tz) a.tz='Asia/Kolkata'; }
+  const sel=(id,list,cur,onch)=>`<select id="${id}" onchange="${onch}">${list.map(([v,l])=>`<option value="${esc(v)}" ${cur===v?'selected':''}>${esc(l)}</option>`).join('')}</select>`;
+  const hh = a.hr===undefined||a.hr==='' ? '' : (h12?birthHour12(a.hr):a.hr);
   return `<h2>${t('s.birth')}</h2><p>${t('p.birthinfo')}</p>
-    <label>${t('p.bname')}</label><input type="text" value="${esc(a.name)}" onchange="astroSet('name',this.value)">
-    <label>${t('p.bdate')}</label><input type="date" value="${esc(a.date)}" onchange="astroSet('date',this.value)">
-    <label>${t('p.btime')}</label><input type="time" value="${esc(a.time)}" onchange="astroSet('time',this.value)">
-    <label>${t('p.bplace')}</label><input type="text" value="${esc(a.place)}" onchange="astroSet('place',this.value)">
-    <div class="hint"><small>${t('p.astroprivacy')}</small></div>`;
+  <div class="sec"><h3>${t('b.sec1')}</h3>
+    <label>${t('b.name')}</label><input type="text" placeholder="${t('b.nameph')}" value="${esc(a.name)}" onchange="astroSet('name',this.value)">
+    <div class="row2"><div><label>${t('b.gender')}</label>${sel('bg',[['','—'],['f',t('b.g.f')],['m',t('b.g.m')],['o',t('b.g.o')]],a.gender||'',"astroSet('gender',this.value)")}</div>
+    <div><label>${t('b.rating')}</label>${sel('br',[['',t('rt.none')],['AA',t('rt.AA')],['A',t('rt.A')],['B',t('rt.B')],['C',t('rt.C')],['DD',t('rt.DD')],['X',t('rt.X')],['XX',t('rt.XX')]],a.rating||'',"astroSet('rating',this.value)")}</div></div>
+    <label>${t('b.date')}</label><input type="text" id="bdate" inputmode="numeric" placeholder="DD/MM/YYYY" maxlength="10" value="${birthDateShow()}" onchange="birthDateSet(this.value)">
+    <div style="margin:.5rem 0"><button class="btn ${h12?'alt':''}" style="margin:0" onclick="birthMode(false)">${t('b.h24')}</button> <button class="btn ${h12?'':'alt'}" style="margin:0" onclick="birthMode(true)">${t('b.h12')}</button></div>
+    <div class="row3"><div><label>${t('b.hours')}</label><input type="number" min="${h12?1:0}" max="${h12?12:23}" value="${esc(hh)}" oninput="birthTimeSet('hr',this.value)"></div>
+      <div><label>${t('b.min')}</label><input type="number" min="0" max="59" value="${esc(a.mi)}" oninput="birthTimeSet('mi',this.value)"></div>
+      <div><label>${t('b.sec')}</label><input type="number" min="0" max="59" value="${esc(a.se||'0')}" oninput="birthTimeSet('se',this.value)"></div></div>
+    ${h12?`<label>AM / PM</label>${sel('bap',[['am','AM'],['pm','PM']],a.ampm||'am',"birthAmpm(this.value)")}`:''}
+  </div>
+  <div class="sec"><h3>${t('b.sec2')}</h3>
+    <label>${t('b.country')}</label>${sel('bc',[['',t('b.selcountry')]].concat(countryList()),a.country||'',"astroSet('country',this.value)")}
+    <label>${t('b.state')}</label><input type="text" value="${esc(a.state)}" onchange="astroSet('state',this.value)">
+    <label>${t('b.citylist')}</label><input type="text" autocomplete="off" value="${esc(a.city)}" oninput="citySuggest(this.value)" onchange="birthCity(this.value)">
+    <div id="citysug"></div>
+    <div class="hint"><small>${t('b.coordnote')}</small></div>
+    <div class="row2"><div><label>${t('b.lat')}</label><input type="number" step="0.0001" min="-90" max="90" value="${esc(a.lat)}" onchange="astroSet('lat',this.value)"></div>
+    <div><label>${t('b.lon')}</label><input type="number" step="0.0001" min="-180" max="180" value="${esc(a.lon)}" onchange="astroSet('lon',this.value)"></div></div>
+    <label>${t('b.tz')}</label><input type="text" list="tzl" value="${esc(a.tz)}" onchange="if(!validTZ(this.value)){toast('b.badtz');this.style.borderColor='#c0392b';}else{this.style.borderColor='';}astroSet('tz',this.value);birthUpdate()">
+    <datalist id="tzl">${tzList().map(z=>`<option value="${esc(z)}">`).join('')}</datalist>
+    <div class="hint"><small>${t('b.tzex')}</small></div>
+    <label style="font-weight:400"><input type="checkbox" onchange="birthKeepPlace(this.checked)"> ${t('b.keep')}</label>
+  </div>
+  <div class="sec"><h3>${t('b.sec3')}</h3><p>${t('b.tzinfo')}</p>
+    <label style="font-weight:400"><input type="checkbox" ${a.manual?'checked':''} onchange="astroSet('manual',this.checked);renderPanel()"> ${t('b.manual')}</label>
+    ${a.manual?`<label>${t('b.moff')}</label><input type="text" placeholder="+05:30" maxlength="6" value="${esc(a.moff)}" onchange="astroSet('moff',this.value);birthUpdate()">`:''}
+    <div class="hint" style="margin-top:.5rem"><b>${t('b.check')}</b> <span id="bchk">${esc(birthCheckText())}</span></div>
+  </div>
+  <div class="sec"><h3>${t('b.sec4')}</h3>
+    <label>${t('b.ayan')}</label>${sel('bay',[['lahiri','Lahiri (Chitrapaksha)'],['raman','Raman'],['kp','Krishnamurti (KP)'],['fb','Fagan-Bradley'],['yuk','Yukteshwar'],['custom',t('b.custom')]],a.ayan||'lahiri',"astroSet('ayan',this.value)")}
+    <label>${t('b.ayc')}</label><input type="text" placeholder="23.85" value="${esc(a.ayc)}" onchange="astroSet('ayc',this.value)">
+    <div class="row2"><div><label>${t('b.node')}</label>${sel('bn',[['mean',t('node.mean')],['true',t('node.true')]],a.node||'mean',"astroSet('node',this.value)")}</div>
+    <div><label>${t('b.hsys')}</label>${sel('bh',[['whole',t('hs.whole')],['equal',t('hs.equal')],['sripati','Sripati'],['chalit','Bhava Chalit']],a.hsys||'whole',"astroSet('hsys',this.value)")}</div></div>
+    <div class="hint"><small>${t('b.setnote')}</small></div>
+  </div>
+  <div class="sec"><label>${t('b.notes')}</label><textarea rows="4" style="width:100%;padding:.45rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit" placeholder="${t('b.notesph')}" onchange="astroSet('notes',this.value)">${esc(a.notes)}</textarea>
+    <button class="btn" onclick="toast('b.saved')">${t('b.save')}</button><button class="btn alt" onclick="birthClear()">${t('b.clear')}</button></div>
+  <div class="hint"><small>${t('p.astroprivacy')}</small></div>`;
 }
 function grahaPanel(){
   return `<h2>${t('s.graha')}</h2><p>${t('p.grahainfo')}</p>

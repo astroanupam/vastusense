@@ -31,3 +31,5 @@ SECURITY NOTES
  - GitHub Pages cannot add custom HTTP headers, so frame protection is done in the page itself.
  - Keep your GitHub account safe: turn on two-factor sign-in, and only you should have write access to the repository.
  - Every map image, diagram and report carries the watermark "VASTUSENSE BY ANOOPAM".
+
+Credits: the birth-place city list is derived from the GeoNames gazetteer (geonames.org), licensed CC BY 4.0.

@@ -194,10 +194,26 @@ M.annoErase = function(p){
   if(!M.annoErasing||!M.annoErasePushed){ M.annoPush(); M.annoErasePushed=true; }
   M.annos.splice(i,1); M.annoSel=-1; M.draw(); M.changed();
 };
+// In-page text box. The browser's prompt() is blocked or missing in some desktop and mobile web views, so it is not used.
+function askText(msg, def, cb){
+  const old=document.getElementById('askbox'); if(old) old.remove();
+  const w=document.createElement('div'); w.id='askbox'; w.className='askbox';
+  const c=document.createElement('div'); c.className='askcard';
+  const l=document.createElement('label'); l.textContent=msg;
+  const i=document.createElement('input'); i.type='text'; i.maxLength=500; i.value=def||'';
+  const b=document.createElement('div');
+  const ok=document.createElement('button'); ok.className='btn'; ok.textContent='OK';
+  const no=document.createElement('button'); no.className='btn alt'; no.textContent=t('ui.cancel');
+  const done=v=>{ w.remove(); if(v!==null) cb(v); };
+  ok.onclick=()=>done(i.value); no.onclick=()=>done(null);
+  i.onkeydown=e=>{ if(e.key==='Enter') done(i.value); else if(e.key==='Escape') done(null); };
+  w.onpointerdown=e=>{ if(e.target===w) done(null); };
+  b.append(ok,no); c.append(l,i,b); w.append(c); document.body.append(w); setTimeout(()=>{ i.focus(); i.select(); },30);
+}
 M.pdown = function(e){
   if(M.mode!=='anno'||e.button>0) return; const p=M.pos(e), tl=M.annoTool, st=M.annoStyle;
   try{ M.cv.setPointerCapture(e.pointerId); }catch(x){}
-  if(tl==='text'){ const s=prompt(t('p.texthere')); if(s){ M.annoPush(); M.annos.push({type:'text', pts:[p], text:s, stroke:st.stroke, size:st.size}); M.draw(); M.changed(); } return; }
+  if(tl==='text'){ e.preventDefault(); askText(t('p.texthere'),'',s=>{ s=String(s).replace(/[\u0000-\u001f\u007f]/g,'').slice(0,500); if(s.trim()){ M.annoPush(); M.annos.push({type:'text', pts:[p], text:s, stroke:st.stroke, size:st.size}); M.draw(); M.changed(); } }); return; }
   if(tl==='erase'){ M.annoErasing=true; M.annoErasePushed=false; M.annoErase(p); return; }
   if(tl==='select'){ const i=M.annoHit(p,true); M.annoSel=i; M.annoDrag = i>=0 ? {last:p} : null; if(i>=0) M.annoPush(); M.draw(); return; }
   M.annoDraft={type:tl, pts:[p,p], free:[p], style:Object.assign({},st)}; M.draw();
@@ -316,8 +332,8 @@ M.click = function(e){ if(M.mode==='anno') return;
   if(M.mode==='scale'){
     M.scalePts.push(p); if(M.scalePts.length===2){
       const px = Math.hypot(M.scalePts[0][0]-M.scalePts[1][0], M.scalePts[0][1]-M.scalePts[1][1]);
-      const m = parseFloat(prompt(t('p.askdist'),'10'));
-      if(m>0){M.pxPerM = px/m;} M.scalePts=[]; M.mode='view';
+      const pts2=M.scalePts; M.scalePts=[]; M.mode='view';
+      askText(t('p.askdist'),'10',v=>{ const m=parseFloat(v); if(m>0){ M.pxPerM=px/m; M.draw(); if(M.changed) M.changed(); } });
     }
   } else if(M.mode==='north'){
     // user clicks toward North as seen from the centre

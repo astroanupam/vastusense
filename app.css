@@ -60,6 +60,10 @@ body.rp-on #reportview{display:block;position:fixed;inset:0;z-index:50;overflow:
 .rp-cert{border:6px double #9a4b1c;padding:1.5rem;text-align:center}.rp-certtext{font-size:1.1rem}
 .rp-wm{position:fixed;left:-50%;top:-50%;width:200%;height:200%;display:flex;flex-wrap:wrap;align-content:space-around;justify-content:space-around;gap:5rem 3rem;transform:rotate(-28deg);pointer-events:none;z-index:3;overflow:hidden}
 .rp-wm span{font:700 1.7rem/1 sans-serif;color:rgba(0,0,0,.07);white-space:nowrap;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+.sec{border:1px solid var(--line);border-radius:10px;padding:.7rem .8rem;margin:.7rem 0;background:var(--bg)}
+.sec h3{margin:0 0 .3rem;font-size:1rem}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:.6rem}
+.sec input[type=text],.sec input[type=number],.sec select{width:100%;padding:.45rem;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink);font:inherit}
 .ctx{position:fixed;z-index:70;min-width:13rem;max-width:18rem;max-height:75vh;overflow:auto;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 24px #0006;padding:.3rem;font-size:.88rem}
 .ctx button{display:block;width:100%;text-align:start;background:none;border:0;color:inherit;padding:.35rem .5rem;border-radius:5px;cursor:pointer;font:inherit}
 .ctx button:hover{background:var(--bg)}.ctx details>summary{cursor:pointer;padding:.35rem .5rem;font-weight:600;border-radius:5px}.ctx details[open]>summary{background:var(--bg)}.ctx hr{border:0;border-top:1px solid var(--line);margin:.3rem 0}.ctx .dng{color:#c0392b}
@@ -68,3 +72,4 @@ body.rp-on #reportview{display:block;position:fixed;inset:0;z-index:50;overflow:
 .ztab{width:100%;font-size:.85rem;border-collapse:collapse}.ztab td{padding:2px 4px}
 .layout.wide{grid-template-columns:12rem minmax(30rem,1.7fr) 1fr}
 @media (max-width:1100px){.layout.wide{grid-template-columns:1fr}.layout{grid-template-columns:1fr}#sub{flex-direction:row;flex-wrap:wrap}.top{flex-wrap:wrap;padding-bottom:.3rem}#menu{order:3;flex-basis:100%}.ctl{margin-inline-start:auto}}
+.askbox{position:fixed;inset:0;z-index:90;background:#0007;display:flex;align-items:center;justify-content:center;padding:1rem}.askcard{background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:1rem;width:min(22rem,100%)}.askcard label{display:block;font-weight:600;margin-bottom:.4rem}.askcard input{width:100%;padding:.5rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit;margin-bottom:.6rem}
