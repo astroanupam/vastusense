@@ -63,7 +63,7 @@ const PANELS = {
   'project/site': ()=>`<h2>${t('s.site')}</h2><p>${t('p.sitenote')}</p>
     <select onchange="P.siteType=this.value"><option value="">${t('p.choose')}</option>${SITE_TYPES.map(g=>`<optgroup label="${t('g.'+g.g)}">${g.t.map(k=>`<option value="${k}" ${P.siteType===k?'selected':''}>${t('t.'+k)}</option>`).join('')}</optgroup>`).join('')}</select>`,
   'project/school': ()=>`<h2>${t('s.school')}</h2><p>${t('p.schoolnote')}</p><label>${t('p.school')}</label>
-    <select onchange="P.school=this.value"><option value="">${t('p.choose')}</option>${['vedic','modern','maha','custom'].map(k=>`<option value="${k}" ${P.school===k?'selected':''}>${t('sc.'+k)}</option>`).join('')}</select>`,
+    <select onchange="P.school=this.value"><option value="">${t('p.choose')}</option>${['vedic','bs','modern','maha','custom'].map(k=>`<option value="${k}" ${P.school===k?'selected':''}>${t('sc.'+k)}</option>`).join('')}</select>`,
   'project/facing': ()=>`<h2>${t('s.facing')}</h2><label>${t('p.facing')}</label>
     <select onchange="P.facing=this.value"><option value="">${t('p.choose')}</option>${['N','NE','E','SE','S','SW','W','NW'].map(c=>`<option value="${c}" ${P.facing===c?'selected':''}>${zoneName(c)} (${c})</option>`).join('')}</select>
     <label>${t('p.config')}</label>
@@ -136,9 +136,9 @@ const PANELS = {
   'hvac/air': ()=>{ const k=['fai','exh','kexh']; return featPanel('s.air',k,`<p>${t('p.airinfo')}</p>`+airBlock()+mepCards(k)); },
   'hvac/duct': ()=>featPanel('s.duct',['duct','pipe'],`<p>${t('p.ductinfo')}</p><button class="btn" onclick="M.finishFeat();renderPanel()">${t('p.finish')}</button>`),
   'lib/faq': ()=>`<h2>${t('s.faq')}</h2>${[1,2,3,4,5,6].map(n=>`<div class="hint"><b>${t('faq.q'+n)}</b><br>${t('faq.a'+n)}</div>`).join('')}`,
-  'plan/entry': ()=>verdictPanel('s.entry','p.entryinfo', i=>i.type==='entrance'),
+  'plan/entry': ()=>featPanel('s.entry',['door'],`<p>${t('p.entryinfo')}</p>`+gateCards()+verdictCards(judgeItems().filter(i=>i.type==='entrance'))),
   'plan/wet': ()=>verdictPanel('s.wet','p.wetinfo', i=>WET.includes(i.type)),
-  'tools/maindoor': ()=>verdictPanel('s.maindoor','p.entryinfo', i=>i.type==='entrance'),
+  'tools/maindoor': ()=>featPanel('s.maindoor',['door'],`<p>${t('p.entryinfo')}</p>`+gateCards()+verdictCards(judgeItems().filter(i=>i.type==='entrance'))),
   'report/score': ()=>scorePanel(),
   'lib/rules': ()=>rulesPanel(),
   'map/layers': ()=>`<h2>${t('s.layers')}</h2><p>${t('p.layersinfo')}</p>
@@ -167,7 +167,7 @@ const PANELS = {
     <div class="hint">${t('p.brhint')}</div>`,
   'zone/elem': ()=>`<h2>${t('s.elem')}</h2><p>${t('p.elinfo')}</p>
     <table class="ztab">${ELEMENTS.map(e=>`<tr><td><b>${t('e.'+e.k)}</b></td><td>${e.z==='centre'?t('el.centre'):zoneName(e.z)+' ('+e.z+')'}</td></tr>`).join('')}</table>`,
-  'lib/classic': ()=>`<h2>${t('s.classic')}</h2><p>${t('p.libnote')}</p>${libList(CLASSICS)}`,
+  'lib/classic': ()=>classicPanel(),
   'lib/modern': ()=>`<h2>${t('s.modern')}</h2><p>${t('p.libnote')}</p>${libList(MODERN)}`,
   'lib/gloss': ()=>`<h2>${t('s.gloss')}</h2><p>${t('p.glosnote')}</p><dl>${GLOSSARY.map(g=>`<dt><b>${esc(g[0])}</b></dt><dd style="margin:0 0 .5rem;margin-inline-start:0;color:var(--mut)">${esc(g[1])}</dd>`).join('')}</dl>`,
   'zone/z16': ()=>`<h2>${t('s.z16')}</h2><p>${t('p.z16info')}</p>
@@ -177,10 +177,11 @@ const PANELS = {
 
 /* ---------- stage 5: rule engine ---------- */
 const DIR8 = ['N','NE','E','SE','S','SW','W','NW'];
-const dirLabel = c => c==='C' ? t('el.centre') : zoneName(c)+' ('+c+')';
+const dirLabel = c => c[0]==='#' ? c.slice(1) : c==='C' ? t('el.centre') : zoneName(c)+' ('+c+')';
+const stLabel = s => t(s==='verified' ? 'st.ver' : s==='pageread' ? 'st.pr' : 'st.unv');
 function activeRules(){
   const sc = P.school || 'vedic';
-  let r = (sc==='vedic'||sc==='modern') ? RULES_STARTER.slice() : [];
+  let r = (sc==='vedic'||sc==='modern') ? RULES_STARTER.slice() : sc==='bs' ? RULES_BS.slice() : [];
   r = r.concat((P.userRules||[]).filter(x=>!x.school||!x.school.length||x.school.includes(sc)));
   return r.filter(x=>!P.siteType||!x.applies||x.applies==='*'||x.applies.includes('*')||x.applies.includes(P.siteType));
 }
@@ -204,7 +205,28 @@ function judgeItems(){
   const items = M.rooms.map(room=>({type:room.type, dir:dir8(M.centroid(room.pts))}));
   M.feats.filter(f=>MEP_KINDS.includes(f.kind)).forEach(f=>items.push({type:f.kind, dir:dir8(M.featPoint(f))}));
   if(P.facing && !M.rooms.some(r=>r.type==='entrance')) items.push({type:'entrance', dir:P.facing, fromFacing:true});
-  return items.map(i=>Object.assign(i,{res:judge(i.type,i.dir)}));
+  const done = items.map(i=>Object.assign(i,{res:judge(i.type,i.dir)}));
+  // Main door on the plot edge, judged by the Brihat Samhita gate squares (school 'bs' only).
+  if(P.school==='bs') M.feats.filter(f=>f.kind==='door').forEach(f=>{ const g=gateOf(M.featPoint(f)); if(!g) return;
+    const tone=g.g[2], v=tone==='good'?'prefer':tone==='mixed'?'ok':'avoid';
+    done.push({type:'door', dir:'#'+gateText(g), res:[{rule:{room:'door',prefer:[],accept:[],avoid:[],weight:5,source:'Brihat Samhita 53.72-75 (published English translation, machine-read; spot-check pending)',status:'pageread'}, v, s:v==='prefer'?1:v==='ok'?.5:0, dir:g.n}]}); });
+  return done;
+}
+// Brihat Samhita gate square of a point on the plot edge: snap to the nearest wall of the north-aligned grid.
+function gateOf(p){
+  const k=M.cellOf(p); if(!k) return null;
+  const m=Math.min(k.row,8-k.row,k.col,8-k.col); let r=k.row, c=8-k.col;      // c counts columns from the east
+  if(m===8-k.col) c=0; else if(m===k.col) c=8; else if(m===k.row) r=0; else r=8;
+  const n=c*9+r+1, wall=(c===0&&r<=7)?'E':(r===8&&c<=7)?'S':(c===8&&r>=1)?'W':'N';
+  return {n, wall, g:GATE_BS[n]};
+}
+const gateText = g => `${t('p.sq')} ${g.n}, ${t('d.'+g.wall)} ${t('p.wall')} (${g.g[0]}): ${g.g[1]}`;
+function gateCards(){
+  const ds=M.feats.filter(f=>f.kind==='door');
+  if(!ds.length) return `<div class="hint">${t('p.gatenone')}</div>`;
+  return ds.map(f=>{ const g=gateOf(M.featPoint(f)); if(!g) return `<div class="hint">${t('p.needplot')}</div>`;
+    const v=g.g[2]==='good'?'prefer':g.g[2]==='mixed'?'ok':'avoid';
+    return `<div class="hint"><b>${t('f.door')}</b> &middot; ${t('d.'+g.wall)} ${t('p.wall')}, ${t('p.sq')} <b>${g.n}</b> (${esc(g.g[0])})<br><span class="vb v-${v}">${t('v.'+v)}</span> ${esc(g.g[1])}<br><small>${t('p.source')}: Brihat Samhita 53.72-75 &middot; ${t('st.pr')}</small></div>`; }).join('') + `<div class="hint"><small>${t('p.gatenote')}</small></div>`;
 }
 function scoreOf(items){
   let num=0, den=0;
@@ -215,7 +237,7 @@ const WET = ['toilet','bath','tank','septic'];
 function verdictCards(items, emptyKey){
   if(!items.length) return `<div class="hint">${t(emptyKey||'p.needrooms')}</div>`;
   return items.map(i=>`<div class="hint"><b>${typeLabel(i.type)}</b> &middot; ${t('p.dir')}: <b>${dirLabel(i.dir)}</b>${i.fromFacing?' ('+t('s.facing')+')':''}` +
-    (i.res.length ? i.res.map(x=>`<div style="margin-top:.25rem"><span class="vb v-${x.v}">${t('v.'+x.v)}</span> <span class="tag">${t('p.weight')} ${x.rule.weight||1}</span> <span class="tag">${t(x.rule.status==='verified'?'st.ver':'st.unv')}</span><br><small>${t('p.source')}: ${esc(x.rule.source)||t('p.srcnone')}</small></div>`).join('')
+    (i.res.length ? i.res.map(x=>`<div style="margin-top:.25rem"><span class="vb v-${x.v}">${t('v.'+x.v)}</span> <span class="tag">${t('p.weight')} ${x.rule.weight||1}</span> <span class="tag">${stLabel(x.rule.status)}</span><br><small>${t('p.source')}: ${esc(x.rule.source)||t('p.srcnone')}</small></div>`).join('')
       : `<div style="margin-top:.25rem"><span class="vb v-neutral">${t('v.norule')}</span></div>`) + `</div>`).join('');
 }
 function verdictPanel(titleKey, infoKey, pick){
@@ -259,7 +281,7 @@ function rulesPanel(){
   return `<h2>${t('s.rules')}</h2><p>${t('p.rulesinfo')}</p><div class="hint">${t('p.rulesnote')}</div>
     <button class="btn alt" onclick="rulesTemplate()">${t('p.rulestpl')}</button><button class="btn alt" onclick="P.userRules=[];renderPanel();renderMenu()">${t('p.rulesclear')}</button>
     <label>${t('p.rulesload')}</label><input type="file" accept=".json" onchange="rulesLoad(this.files[0])">
-    <div style="margin-top:.6rem">${act.length ? act.map(r=>`<div class="hint"><b>${typeLabel(r.room)}</b> <span class="tag">${t('p.weight')} ${r.weight||1}</span> <span class="tag">${t(r.status==='verified'?'st.ver':'st.unv')}</span><br>
+    <div style="margin-top:.6rem">${act.length ? act.map(r=>`<div class="hint"><b>${typeLabel(r.room)}</b> <span class="tag">${t('p.weight')} ${r.weight||1}</span> <span class="tag">${stLabel(r.status)}</span><br>
       <span class="vb v-prefer">${(r.prefer||[]).join(' ')||'-'}</span> <span class="vb v-ok">${(r.accept||[]).join(' ')||'-'}</span> <span class="vb v-avoid">${(r.avoid||[]).join(' ')||'-'}</span><br><small>${t('p.source')}: ${esc(r.source)||t('p.srcnone')}</small></div>`).join('') : `<div class="hint">${t('p.norules')}</div>`}</div>`;
 }
 function rulesTemplate(){
@@ -431,11 +453,11 @@ function rpScore(){
   const items=judgeItems(), sc=scoreOf(items); if(!sc) return '';
   let h=`<div class="rp-big">${sc.pct.toFixed(0)} / 100</div><div class="rp-sm">${t('p.scoretotal')}: ${sc.num.toFixed(1)} / ${sc.den.toFixed(1)}</div>`;
   h += rpTbl([t('p.perdir'),''], [...DIR8,'C'].map(d=>{ const s=scoreOf(items.filter(i=>i.dir===d)); return s?[dirLabel(d), `<div class="rp-bar1"><i style="width:${s.pct}%"></i></div> ${s.pct.toFixed(0)}`]:null; }).filter(Boolean));
-  const rows=[]; items.filter(i=>i.res.length).forEach(i=>i.res.forEach(x=>rows.push([typeLabel(i.type), dirLabel(i.dir), `<span class="vb v-${x.v}">${t('v.'+x.v)}</span>`, x.rule.weight||1, esc(x.rule.source)||t('p.srcnone')+' ('+t(x.rule.status==='verified'?'st.ver':'st.unv')+')'])));
+  const rows=[]; items.filter(i=>i.res.length).forEach(i=>i.res.forEach(x=>rows.push([typeLabel(i.type), dirLabel(i.dir), `<span class="vb v-${x.v}">${t('v.'+x.v)}</span>`, x.rule.weight||1, esc(x.rule.source)||t('p.srcnone')+' ('+stLabel(x.rule.status)+')'])));
   return h + rpTbl([t('p.roomtype'),t('p.dir'),'',t('p.weight'),t('p.source')], rows);
 }
 function rpRules(items){
-  return rpTbl([t('p.roomtype'),'',t('p.weight'),t('p.source')], usedRules(items).map(r=>[typeLabel(r.room), `<span class="vb v-prefer">${(r.prefer||[]).join(' ')||'-'}</span> <span class="vb v-ok">${(r.accept||[]).join(' ')||'-'}</span> <span class="vb v-avoid">${(r.avoid||[]).join(' ')||'-'}</span>`, r.weight||1, (esc(r.source)||t('p.srcnone'))+' — '+t(r.status==='verified'?'st.ver':'st.unv')]));
+  return rpTbl([t('p.roomtype'),'',t('p.weight'),t('p.source')], usedRules(items).map(r=>[typeLabel(r.room), `<span class="vb v-prefer">${(r.prefer||[]).join(' ')||'-'}</span> <span class="vb v-ok">${(r.accept||[]).join(' ')||'-'}</span> <span class="vb v-avoid">${(r.avoid||[]).join(' ')||'-'}</span>`, r.weight||1, (esc(r.source)||t('p.srcnone'))+' — '+stLabel(r.status)]));
 }
 function showReport(html){
   $('reportview').innerHTML = `<div class="rp-bar"><button class="btn" onclick="window.print()">${t('rp.print')}</button><button class="btn alt" onclick="closeReport()">${t('rp.close')}</button></div><div class="rp">${html}</div>`;
@@ -525,9 +547,9 @@ function remedyCards(){
     let h = `<div class="hint">${itemLine(it)}`;
     it.res.filter(x=>x.v==='avoid'||x.v==='neutral').forEach(x=>{
       const pf=(x.rule.prefer||[]).filter(d=>d!==it.dir).map(dirLabel).join(', '), ac=(x.rule.accept||[]).filter(d=>d!==it.dir).map(dirLabel).join(', ');
-      h += `<div style="margin-top:.3rem"><span class="tag">${t('rm.layout')}</span> ${t('rm.move',{from:dirLabel(it.dir)})}: ` + (pf?`<span class="vb v-prefer">${pf}</span> `:'') + (ac?`<span class="vb v-ok">${ac}</span>`:'') + `<br><small>${t('p.source')}: ${esc(x.rule.source)||t('p.srcnone')} &middot; ${t(x.rule.status==='verified'?'st.ver':'st.unv')}</small></div>`; });
+      h += `<div style="margin-top:.3rem"><span class="tag">${t('rm.layout')}</span> ${t('rm.move',{from:dirLabel(it.dir)})}: ` + (pf?`<span class="vb v-prefer">${pf}</span> `:'') + (ac?`<span class="vb v-ok">${ac}</span>`:'') + `<br><small>${t('p.source')}: ${esc(x.rule.source)||t('p.srcnone')} &middot; ${stLabel(x.rule.status)}</small></div>`; });
     mine.filter(r=>r.room===it.type && (!r.dirs.length||r.dirs.includes(it.dir)) && (!r.verdict.length||it.res.some(x=>r.verdict.includes(x.v)))).forEach(r=>{
-      h += `<div style="margin-top:.3rem"><span class="tag">${t('rm.'+r.category)}</span> <span class="tag">${t(r.structural?'rm.struct':'rm.nostruct')}</span> ${esc(r.text)}<br><small>${t('p.source')}: ${esc(r.source)||t('p.srcnone')} &middot; ${t(r.status==='verified'?'st.ver':'st.unv')}</small></div>`; });
+      h += `<div style="margin-top:.3rem"><span class="tag">${t('rm.'+r.category)}</span> <span class="tag">${t(r.structural?'rm.struct':'rm.nostruct')}</span> ${esc(r.text)}<br><small>${t('p.source')}: ${esc(r.source)||t('p.srcnone')} &middot; ${stLabel(r.status)}</small></div>`; });
     return h + '</div>';
   }).join('');
   return cards || `<div class="hint">${t(items.length||judgeItems().some(i=>i.res.length)?'rm.none':'p.needrooms')}</div>`;
@@ -656,7 +678,110 @@ function cmDevice(){
   if(typeof DeviceOrientationEvent.requestPermission==='function') DeviceOrientationEvent.requestPermission().then(s=>{ if(s==='granted') start(); else live.textContent=t('p.cmnone'); });
   else start();
 }
-const libList =a => a.map(x=>`<div class="hint"><b>${esc(x.n)}</b><br><span class="tag">${esc(x.by)}</span><br>${esc(x.d)}</div>`).join('');
+const libTable = tb => (tb.title?`<br><b>${esc(tb.title)}</b>`:'') + `<table class="ztab" style="margin:.4rem 0"><tr>${tb.head.map(h=>`<td><b>${esc(h)}</b></td>`).join('')}</tr>${tb.rows.map(r=>`<tr>${r.map(c=>`<td>${esc(c)}</td>`).join('')}</tr>`).join('')}</table>` +
+  (tb.notes ? `<ul style="margin:.2rem 0 .4rem 1.1rem;padding:0">${tb.notes.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>` : '');
+const libList = a => a.map(x=>`<div class="hint"><b>${esc(x.n)}</b><br><span class="tag">${esc(x.by)}</span><br>${esc(x.d)}</div>`).join('');
+
+/* ---------- Brihat Samhita detail view: tabs, tables, diagrams ---------- */
+let libView = {i:null, tab:0};
+function libOpenSrc(i){ libView = {i, tab:0}; renderPanel(); window.scrollTo(0,0); }
+function libTabSel(k){ libView.tab = k; renderPanel(); }
+function libBack(){ libView = {i:null, tab:0}; renderPanel(); }
+const STAT = {ok:['Confirmed','v-prefer'], part:['Partly','v-ok'], diff:['Differs','v-avoid'], none:['Not on page','v-neutral'], unc:['Not checked','v-neutral']};
+const libCheck = c => (c.title?`<br><b>${esc(c.title)}</b>`:'') + `<table class="ztab" style="margin:.4rem 0"><tr><td><b>Your pasted statement</b></td><td><b>Status</b></td><td><b>What the page says</b></td></tr>${c.rows.map(r=>`<tr><td>${esc(r[0])}</td><td><span class="vb ${STAT[r[1]][1]}">${STAT[r[1]][0]}</span></td><td>${esc(r[2])}</td></tr>`).join('')}</table>`;
+function secBlocks(bl){
+  return bl.map(b=>
+    b.p ? `<p>${esc(b.p)}</p>` :
+    b.h ? `<h3 style="margin:.8rem 0 .2rem">${esc(b.h)}</h3>` :
+    b.list ? `<b>${esc(b.list.title)}</b><ul style="margin:.2rem 0 .4rem 1.1rem;padding:0">${b.list.items.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>` :
+    b.table ? libTable(b.table) :
+    b.check ? libCheck(b.check) :
+    b.notes ? `<ul style="margin:.2rem 0 .4rem 1.1rem;padding:0">${b.notes.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>` :
+    b.svg ? `<div>${DIAG[b.svg]()}</div><p class="rp-sm" style="font-size:.8rem">${esc(b.cap||'')}</p>` :
+    b.tool==='dims' ? dimsTool() : '').join('');
+}
+function classicPanel(){
+  if(libView.i===null) return `<h2>${t('s.classic')}</h2><p>${t('p.libnote')}</p>` + CLASSICS.map((x,i)=>`<div class="hint"><b>${esc(x.n)}</b><br><span class="tag">${esc(x.by)}</span><br>${esc(x.d)}${x.sections?`<br><button class="btn" style="margin-top:.4rem" onclick="libOpenSrc(${i})">${t('lib.opendetail')} &rsaquo;</button>`:''}</div>`).join('');
+  if(!CLASSICS[libView.i] || !CLASSICS[libView.i].sections){ libView = {i:null, tab:0}; return classicPanel(); }
+  const x = CLASSICS[libView.i], sec = x.sections[libView.tab] || x.sections[0];
+  setTimeout(()=>{ if($('bsRank')) bsDimUpdate(); },0);
+  return `<button class="btn alt" onclick="libBack()">&lsaquo; ${t('s.classic')}</button><h2 style="margin-top:.5rem">${esc(x.n)}</h2><p>${esc(x.by)}. ${t('p.libnote')}</p>
+    <div>${x.sections.map((s,k)=>`<button class="btn ${k===libView.tab?'':'alt'}" onclick="libTabSel(${k})">${esc(s.title)}</button>`).join('')}</div>
+    <h2 style="margin-top:.8rem">${esc(sec.title)}</h2>${secBlocks(sec.blocks)}`;
+}
+
+// Page numbering: squares run down each column from the north-east corner, east column first.
+const BS_OUTER = {1:'Agni',2:'Parjanya',3:'Jayanta',4:'Indra',5:'Surya',6:'Satya',7:'Bhrisha',8:'Antariksha',9:'Vayu',18:'Pusha',27:'Vitatha',36:'Brihatkshata',45:'Yama',54:'Gandharva',63:'Bhringaraja',72:'Mriga',81:'Pitri',80:'Dauvarika',79:'Sugriva',78:'Kusumadanta',77:'Varuna',76:'Asura',75:'Shesha',74:'Papayakshma',73:'Roga',64:'Ahi',55:'Mukhya',46:'Bhallata',37:'Soma',28:'Bhujaga',19:'Aditi',10:'Diti'};
+const BS_INNER = {11:'Apa',17:'Savitra',71:'Jaya',65:'Rudra',21:'Apavatsa',25:'Savita',61:'Indra',57:'Rajayakshma',23:'Aryaman',43:'Vivasvan',59:'Mitra',39:'Prithvidhara'};
+const BS_BRAHMA = [31,32,33,40,41,42,49,50,51];
+const BS_GOOD = [3,4,78,77,55,46,37], BS_MIX = [2,36];
+const BS_BODY = {1:['head','Agni'],11:['face','Apa'],21:['breast','Apavatsa'],23:['r. nipple','Aryaman'],41:['heart','Brahma'],43:['belly','Vivasvan'],71:['penis','Jaya'],61:['penis','Indra'],81:['feet','Pitri']};
+const BS_LINES = [[73,9],[81,1],[27,75],[55,7],[3,63],[19,79]];
+function bsGrid(mode){
+  const s=44, pad=46, W=2*pad+9*s, pos=n=>{ const c=Math.floor((n-1)/9), r=(n-1)%9; return {c,r,x:pad+(8-c)*s,y:pad+r*s}; };
+  let o=`<svg viewBox="0 0 ${W} ${W}" style="width:100%;max-width:34rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" role="img">`;
+  for(let n=1;n<=81;n++){
+    const p=pos(n), edge=p.c===0||p.c===8||p.r===0||p.r===8, br=BS_BRAHMA.includes(n);
+    let fill = br ? '#ffe58a' : edge ? '#f6e7cf' : '#e6efe0', l1='', l2='';
+    if(mode==='gate'){ fill = br ? '#fff' : edge ? (BS_GOOD.includes(n)?'#7bc67e':BS_MIX.includes(n)?'#ffd36b':'#f0a29a') : '#eee'; }
+    if(mode==='marma'){ fill = br ? '#fff3bf' : '#fbf7ee'; }
+    if(mode==='body'){ fill = BS_BODY[n] ? '#ffb3d1' : (br ? '#fff3bf' : '#fbf7ee'); }
+    if(mode==='grid'||mode==='gate') l1 = BS_OUTER[n] || BS_INNER[n] || (n===41?'Brahma':'');
+    if(mode==='marma' && BS_LINES.some(l=>l.includes(n))) l1 = BS_OUTER[n] || '';
+    if(mode==='body' && BS_BODY[n]){ l1=BS_BODY[n][0]; l2=BS_BODY[n][1]; }
+    o += `<rect x="${p.x}" y="${p.y}" width="${s}" height="${s}" fill="${fill}" stroke="#999" stroke-width=".6"/><text x="${p.x+3}" y="${p.y+9}" font-size="7" fill="#888">${n}</text>`;
+    if(l1) o += `<text x="${p.x+s/2}" y="${p.y+s/2+(l2?0:4)}" font-size="7.5" text-anchor="middle" fill="#222" font-weight="${l2?'700':'400'}">${l1}</text>`;
+    if(l2) o += `<text x="${p.x+s/2}" y="${p.y+s/2+10}" font-size="7" text-anchor="middle" fill="#444">${l2}</text>`;
+  }
+  if(mode==='marma'){
+    const ctr=n=>{ const p=pos(n); return [p.x+s/2,p.y+s/2]; }, segs=BS_LINES.map(l=>[ctr(l[0]),ctr(l[1])]), cols=['#c0392b','#c0392b','#2471a3','#2471a3','#117a65','#117a65'];
+    segs.forEach((g,i)=>{ o+=`<line x1="${g[0][0]}" y1="${g[0][1]}" x2="${g[1][0]}" y2="${g[1][1]}" stroke="${cols[i]}" stroke-width="1.6"/>`; });
+    const seen=[]; for(let i=0;i<6;i++)for(let j=i+1;j<6;j++){ const [p1,p2]=segs[i],[p3,p4]=segs[j], d=(p1[0]-p2[0])*(p3[1]-p4[1])-(p1[1]-p2[1])*(p3[0]-p4[0]); if(Math.abs(d)<1e-9) continue;
+      const tt=((p1[0]-p3[0])*(p3[1]-p4[1])-(p1[1]-p3[1])*(p3[0]-p4[0]))/d, uu=((p1[0]-p3[0])*(p1[1]-p2[1])-(p1[1]-p3[1])*(p1[0]-p2[0]))/d;
+      if(tt>=-1e-9&&tt<=1+1e-9&&uu>=-1e-9&&uu<=1+1e-9){ const x=p1[0]+tt*(p2[0]-p1[0]), y=p1[1]+tt*(p2[1]-p1[1]); if(!seen.some(q=>Math.hypot(q[0]-x,q[1]-y)<1)) seen.push([x,y]); } }
+    seen.forEach(q=>{ o+=`<circle cx="${q[0]}" cy="${q[1]}" r="4.5" fill="#000" stroke="#fff"/>`; });
+    o+=`<text x="${W/2}" y="${W-8}" font-size="10" text-anchor="middle" fill="#222">${seen.length} crossing points</text>`;
+  }
+  o += `<g font-size="12" font-weight="700" fill="#444" text-anchor="middle"><text x="${W/2}" y="16">N</text><text x="${W/2}" y="${W-30}">S</text><text x="${W-12}" y="${W/2+4}">E</text><text x="12" y="${W/2+4}">W</text></g>`;
+  if(mode==='grid'){ o += `<g font-size="7.5" fill="#7b241c"><text x="${W-pad+2}" y="${pad-6}">Caraki</text><text x="${W-pad+2}" y="${W-pad+14}">Vidari</text><text x="3" y="${W-pad+14}">Putana</text><text x="3" y="${pad-6}">Rakshasi</text></g>`; }
+  return o + '</svg>';
+}
+function bsDoor(){
+  return `<svg viewBox="0 0 320 300" style="width:100%;max-width:22rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" font-size="9">
+   <rect x="80" y="20" width="120" height="240" fill="#a0693a" stroke="#4a2c12"/><rect x="98" y="48" width="84" height="190" fill="#fff" stroke="#4a2c12"/>
+   <text x="89" y="145" text-anchor="middle" fill="#fff" transform="rotate(-90 89 145)">side frame</text><text x="191" y="145" text-anchor="middle" fill="#fff" transform="rotate(90 191 145)">side frame</text>
+   <text x="140" y="38" text-anchor="middle" fill="#fff">top frame (1.5 x side frame)</text><text x="140" y="253" text-anchor="middle" fill="#fff">bottom frame</text>
+   <line x1="225" y1="20" x2="225" y2="260" stroke="#c0392b"/><text x="232" y="144" fill="#c0392b">height = 2 x width</text>
+   <line x1="80" y1="276" x2="200" y2="276" stroke="#c0392b"/><text x="140" y="290" text-anchor="middle" fill="#c0392b">width</text>
+   <text x="12" y="20" fill="#333">thickness (front to back)</text><text x="12" y="32" fill="#333">= 7 x height / 80</text></svg>`;
+}
+function bsTrees(){
+  const pairs={N:['Plaksha','Udumbara'],E:['Banyan','Ashvattha'],S:['Udumbara','Plaksha'],W:['Ashvattha','Banyan']}; // [good, bad]
+  const at={N:[150,38],E:[262,150],S:[150,262],W:[38,150]};
+  let o=`<svg viewBox="0 0 300 300" style="width:100%;max-width:22rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" font-size="10"><circle cx="150" cy="150" r="82" fill="#f6f1e6" stroke="#bbb"/><path d="M150 40V260M40 150H260" stroke="#ddd"/><text x="150" y="154" text-anchor="middle" font-size="11" fill="#555">house</text>`;
+  for(const k in at){ const [x,y]=at[k]; o+=`<text x="${x}" y="${y-14}" text-anchor="middle" font-weight="700" fill="#444">${k}</text><text x="${x}" y="${y}" text-anchor="middle" fill="#1e8449">${pairs[k][0]} (good)</text><text x="${x}" y="${y+13}" text-anchor="middle" fill="#c0392b">${pairs[k][1]} (bad)</text>`; }
+  return o+'</svg>';
+}
+const DIAG = {grid:()=>bsGrid('grid'), gate:()=>bsGrid('gate'), marma:()=>bsGrid('marma'), body:()=>bsGrid('body'), door:bsDoor, trees:bsTrees};
+
+const BS_RANKS = [['King',[108,100,92,84,76],4],['Commander-in-chief',[64,58,52,46,40],6],['Prime minister',[60,56,52,48,44],8],['Crown prince',[80,74,68,62,56],3],['Astrologer, priest',[40,36,32,28,24],6],
+  ['Brahmin class',[32,28,24,20,16],10],['Kshatriya class',[32,28,24,20,16],8],['Vaishya class',[32,28,24,20,16],6],['Shudra class',[32,28,24,20,16],4]];
+function dimsTool(){
+  return `<label>House for</label><select id="bsRank" onchange="bsRankChange()">${BS_RANKS.map((r,i)=>`<option value="${i}">${r[0]}</option>`).join('')}</select>
+    <label>Breadth (cubits)</label><select id="bsStep" onchange="bsDimUpdate()"></select><div id="bsDimOut" style="margin:.5rem 0"></div>`;
+}
+function bsRankChange(){ const r=BS_RANKS[+$('bsRank').value]; $('bsStep').innerHTML = r[1].map(b=>`<option value="${b}">${b}</option>`).join(''); bsDimUpdate(); }
+function bsDimUpdate(){
+  const sel=$('bsStep'); if(!sel) return; if(!sel.options.length){ bsRankChange(); return; }
+  const r=BS_RANKS[+$('bsRank').value], B=+sel.value, f=r[2], L=B*(1+1/f), wall=B/16, floor=B/16+4;
+  const k=Math.min(260/L,170/B), w=L*k, h=B*k, t=wall*k, x0=20, y0=20;
+  $('bsDimOut').innerHTML = `<svg viewBox="0 0 320 230" style="width:100%;max-width:26rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" font-size="10">
+    <rect x="${x0}" y="${y0}" width="${w}" height="${h}" fill="#e8dcc0" stroke="#4a2c12" stroke-width="${Math.max(1,t)}"/>
+    <text x="${x0+w/2}" y="${y0+h+16}" text-anchor="middle">length ${L.toFixed(2)} cubits</text><text x="${x0+w+8}" y="${y0+h/2}" font-size="9">breadth ${B}</text>
+    <text x="${x0+w/2}" y="${y0+h/2}" text-anchor="middle" fill="#555">wall thickness ${wall.toFixed(2)} (drawn to scale)</text>
+    <text x="${x0+w/2}" y="${y0+h/2+14}" text-anchor="middle" fill="#555">floor height ${floor.toFixed(2)} cubits</text></svg>
+    <div class="rp-sm" style="font-size:.8rem">Length = breadth + 1/${f} (verses 4-13); wall = breadth / 16 (23); floor height = breadth / 16 + 4 (22). All in cubits, as the page gives them.</div>`;
+}
 function devTemplate(){
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify({cells:Array(81).fill('')})],{type:'application/json'}));
@@ -676,6 +801,7 @@ function renderPanel(){
   $('panel').innerHTML = PANELS[key] ? PANELS[key]()
     : `<h2>${t('s.'+sub.id)}</h2><div class="soonbox">${t('ui.soon',{n:sub.stage})}</div>`;
   $('panel').innerHTML += `<div style="margin-top:1rem"><button class="btn alt" onclick="nextStep()">${t('ui.next')} &rsaquo;</button></div>`;
+  document.querySelector('.layout').classList.toggle('wide', key==='lib/classic' && libView.i!==null);
 }
 
 /* ---------- files ---------- */
@@ -696,6 +822,44 @@ function openProject(f){
     if(P.imgData) M.setImage(P.imgData, renderMapTools); else M.draw(); renderPanel(); renderMapTools(); toast('p.loaded'); };
   r.readAsText(f);
 }
+
+/* ---------- Samarangana Sutradhara diagrams (from the summary's titles and structure only) ---------- */
+function ssBook(){
+  const W=600, tot=83, seg=[[49,'#d9c9a8','Chapters 1-48 and 51','Town planning, house building, machines'],[20,'#c9a98f','20 chapters','Temples'],[14,'#a9c4b4','Chapters 70-83','Images (8) and painting (6)']];
+  let x=10, o=`<svg viewBox="0 0 620 130" style="width:100%;max-width:38rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" role="img"><text x="10" y="18" font-size="11" font-weight="700">The book in three parts (original numbering, 83 chapters)</text>`;
+  seg.forEach(s=>{ const w=W*s[0]/tot; o+=`<rect x="${x}" y="30" width="${w}" height="50" fill="${s[1]}" stroke="#555"/><text x="${x+w/2}" y="52" font-size="10" text-anchor="middle" font-weight="700">${s[2]}</text><text x="${x+w/2}" y="68" font-size="9" text-anchor="middle">${s[3]}</text><text x="${x+w/2}" y="96" font-size="9" text-anchor="middle" fill="#555">${s[0]} chapters</text>`; x+=w; });
+  return o+`<text x="10" y="120" font-size="9" fill="#555">Bar lengths are proportional to chapter counts given in the introduction.</text></svg>`;
+}
+const SS_THEMES = [['Creation and origins','#8e7cc3',[1,2,3,4]],['Geography, society','#76a5af',[5,6,7]],['The architect, the science','#f6b26b',[8,9]],['Land and site','#93c47d',[10,37,39]],
+  ['Ritual and foundation','#e06666',[20,21,22,23,24,25,45,47,56]],['Town planning','#6fa8dc',[17,18]],['Palaces and royal buildings','#c27ba0',[26,27,28,29,30,31]],['Houses and parts','#ffd966',[32,33,34,35,36,38,40,41,42,43,44,46]],
+  ['Machines, furniture','#b6d7a8',[48,49]],['Temples','#9fc5e8',[50,51,52,53,54,55,57,58,59,60,61,62,63,64,65,66,67,68,69,70]],['Images and poses','#d5a6bd',[71,72,73,74,75,76,77,78]],['Painting, rasa, measures','#ea9999',[79,80,81,82,83,84]]];
+function ssMap(){
+  const c=42, cols=12, pad=10, th=n=>SS_THEMES.find(t=>t[2].includes(n)), rows=7, legY=pad+rows*c+14;
+  let o=`<svg viewBox="0 0 ${pad*2+cols*c} ${legY+Math.ceil(SS_THEMES.length/2)*16+12}" style="width:100%;max-width:38rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" role="img">`;
+  for(let n=1;n<=84;n++){ const r=Math.floor((n-1)/cols), q=(n-1)%cols, t=th(n); o+=`<rect x="${pad+q*c}" y="${pad+r*c}" width="${c-3}" height="${c-3}" fill="${t?t[1]:'#eee'}" stroke="${t?'#666':'#ccc'}" stroke-width=".6"/><text x="${pad+q*c+(c-3)/2}" y="${pad+r*c+(c-3)/2+4}" font-size="11" text-anchor="middle" fill="${t?'#222':'#aaa'}">${n}</text>`; }
+  SS_THEMES.forEach((t,i)=>{ const x=pad+(i%2)*((cols*c)/2), y=legY+Math.floor(i/2)*16; o+=`<rect x="${x}" y="${y-9}" width="11" height="11" fill="${t[1]}" stroke="#666" stroke-width=".5"/><text x="${x+16}" y="${y}" font-size="10">${t[0]}</text>`; });
+  return o+'</svg>';
+}
+function ssTown(){
+  return `<svg viewBox="0 0 440 360" style="width:100%;max-width:30rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" font-size="10" role="img">
+   <rect x="20" y="20" width="400" height="300" rx="10" fill="#e8f1fa" stroke="#4a90c8" stroke-width="12"/>
+   <rect x="38" y="38" width="364" height="264" rx="6" fill="#faf6ee" stroke="#8a6a3e" stroke-width="7"/>
+   <path d="M220 38V302M38 170H402" stroke="#999" stroke-width="9"/><path d="M220 38V302M38 170H402" stroke="#fff" stroke-width="1.5" stroke-dasharray="6 6"/>
+   <rect x="208" y="30" width="24" height="16" fill="#faf6ee"/><rect x="208" y="294" width="24" height="16" fill="#faf6ee"/><rect x="30" y="158" width="16" height="24" fill="#faf6ee"/><rect x="394" y="158" width="16" height="24" fill="#faf6ee"/>
+   <rect x="58" y="58" width="140" height="94" fill="#ffd966" stroke="#8a6a3e"/><text x="128" y="108" text-anchor="middle">quarters by caste</text><text x="128" y="121" text-anchor="middle">and trade</text>
+   <rect x="242" y="58" width="140" height="94" fill="#ffd966" stroke="#8a6a3e"/><text x="312" y="108" text-anchor="middle">quarters by caste</text><text x="312" y="121" text-anchor="middle">and trade</text>
+   <rect x="58" y="190" width="140" height="94" fill="#ffd966" stroke="#8a6a3e"/><text x="128" y="240" text-anchor="middle">quarters by caste</text><text x="128" y="253" text-anchor="middle">and trade</text>
+   <rect x="242" y="190" width="140" height="94" fill="#ffd966" stroke="#8a6a3e"/><text x="312" y="240" text-anchor="middle">quarters by caste</text><text x="312" y="253" text-anchor="middle">and trade</text>
+   <rect x="204" y="156" width="32" height="28" fill="#c27ba0" stroke="#4a2c12"/><text x="220" y="174" text-anchor="middle" font-size="9" fill="#fff">temple</text>
+   <text x="220" y="14" text-anchor="middle" font-weight="700">moat</text><text x="220" y="334" text-anchor="middle" fill="#8a6a3e" font-weight="700">rampart</text><text x="220" y="348" text-anchor="middle" fill="#666">roads and gates</text></svg>`;
+}
+function ssTemples(){
+  const rows=[['Ch. 55','64 temples (Rucaka and others)',64],['Ch. 57','65 temples (Vimana and others)',65],['Ch. 58','16 temples (Meru and others)',16],['Ch. 59','40 temples of the pure type',40],['Ch. 60','20 temples (Meru and others)',20],['Ch. 61','20 Nagara temples',20],['Ch. 62','36 temples (Shrikuta and others)',36]];
+  let o=`<svg viewBox="0 0 560 ${rows.length*26+36}" style="width:100%;max-width:38rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" font-size="10" role="img"><text x="10" y="16" font-weight="700">Temples named in the chapter titles (count)</text>`;
+  rows.forEach((r,i)=>{ const y=28+i*26; o+=`<text x="10" y="${y+12}">${r[0]}</text><rect x="52" y="${y}" width="${r[2]*4}" height="18" fill="#9fc5e8" stroke="#4a78a8"/><text x="${52+r[2]*4+6}" y="${y+13}">${r[2]}  ${r[1]}</text>`; });
+  return o+'</svg>';
+}
+Object.assign(DIAG,{ssBook, ssMap, ssTown, ssTemples});
 
 /* ---------- start ---------- */
 M.onChange = ()=>{ renderMapTools(); if(cur.sec==='map') renderPanel(); };

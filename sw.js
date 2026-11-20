@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION whenever any file changes.
-const VERSION = 'vastusense-13';
+const VERSION = 'vastusense-24';
 const FILES = ['./','index.html','app.css','data.js','i18n.js','map.js','app.js','manifest.webmanifest','icon.svg','icon-maskable.svg'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

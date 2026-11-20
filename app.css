@@ -41,7 +41,7 @@ body{margin:0;font:1rem/1.45 system-ui,"Segoe UI","Noto Sans Devanagari","Noto N
 #map{display:block;width:100%;height:auto;cursor:crosshair}
 .empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--mut);pointer-events:none;padding:1.2rem}
 .zoneinfo{margin-top:.5rem;padding:.5rem .65rem;background:var(--bg);border-radius:6px;font-size:.9rem;min-height:2.6rem}
-.hint{background:var(--bg);border-inline-start:3px solid var(--acc);padding:.45rem .65rem;margin:.5rem 0;font-size:.85rem;border-radius:4px}
+.hint{overflow:hidden;background:var(--bg);border-inline-start:3px solid var(--acc);padding:.45rem .65rem;margin:.5rem 0;font-size:.85rem;border-radius:4px}
 .vb{display:inline-block;font-size:.78rem;padding:1px .5rem;border-radius:9px;font-weight:600}
 .v-prefer{background:#2d7a4b;color:#fff}.v-ok{background:#d9a21b;color:#1b1400}.v-avoid{background:#c0392b;color:#fff}.v-neutral{background:var(--bg);color:var(--mut);border:1px solid var(--line)}
 /* report overlay: always light, printable */
@@ -59,4 +59,5 @@ body.rp-on #reportview{display:block;position:fixed;inset:0;z-index:50;overflow:
 .rp-cert{border:6px double #9a4b1c;padding:1.5rem;text-align:center}.rp-certtext{font-size:1.1rem}
 @media print{body.rp-on>*:not(#reportview){display:none!important}body.rp-on #reportview{position:static;overflow:visible}.rp-bar{display:none}@page{margin:14mm}}
 .ztab{width:100%;font-size:.85rem;border-collapse:collapse}.ztab td{padding:2px 4px}
-@media (max-width:1100px){.layout{grid-template-columns:1fr}#sub{flex-direction:row;flex-wrap:wrap}.top{flex-wrap:wrap;padding-bottom:.3rem}#menu{order:3;flex-basis:100%}.ctl{margin-inline-start:auto}}
+.layout.wide{grid-template-columns:12rem minmax(30rem,1.7fr) 1fr}
+@media (max-width:1100px){.layout.wide{grid-template-columns:1fr}.layout{grid-template-columns:1fr}#sub{flex-direction:row;flex-wrap:wrap}.top{flex-wrap:wrap;padding-bottom:.3rem}#menu{order:3;flex-basis:100%}.ctl{margin-inline-start:auto}}
