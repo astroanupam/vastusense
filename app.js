@@ -55,7 +55,7 @@ function sanitizeProject(d){
   P2.rpSel={}; RP_SECTIONS.forEach(k=>{ if(s.rpSel&&s.rpSel[k]===false) P2.rpSel[k]=false; });
   P2.cert={name:sStr((s.cert||{}).name,200), ok:(s.cert||{}).ok===true};
   P2.astro=sAstro(s.astro);
-  P2.charts=(Array.isArray(s.charts)?s.charts:[]).slice(0,50).map(c=>(c&&typeof c==='object')?{label:sStr(c.label,120), data:sAstro(c.data)}:null).filter(Boolean);
+  P2.charts=(Array.isArray(s.charts)?s.charts:[]).slice(0,50).map(c=>(c&&typeof c==='object')?{label:sStr(c.label,120), data:sAstro(c.data), custom:c.custom===true}:null).filter(Boolean);
   const map={northDeg:sNum(m.northDeg,-360,360,0), closed:m.closed===true, pxPerM:sNum(m.pxPerM,0,1e6,0), zsys:sEnum(m.zsys,[8,16,24,32],16)};
   map.poly=sPts(m.poly,0,500)||[]; map.centre=sPt(m.centre);
   map.devata=(Array.isArray(m.devata)&&m.devata.length===81)?m.devata.map(v=>sStr(v,60)):null;
@@ -102,30 +102,31 @@ function renderChrome(){
   $('langsel').innerHTML = LANGS.map(l=>`<option value="${l[0]}" ${l[0]===LANG?'selected':''}>${l[1]}</option>`).join('');
   $('langsel').title = t('ui.lang'); $('themebtn').title = t('ui.theme');
   $('fdown').title = $('fup').title = t('ui.font');
-  $('empty').innerHTML = esc(t('ui.empty'));
+  $('empty').innerHTML = esc(t('ui.empty')); authChrome();
 }
 function refreshAll(){ grahaSync(); renderChrome(); renderMenu(); renderPanel(); renderMapTools(); $('zoneinfo').textContent = t('ui.clickmap'); }
 
 /* ---------- menu ---------- */
+const MENU_V = () => MENU.filter(s=>s.id!=='admin' || (typeof SESSION!=='undefined' && SESSION && SESSION.role==='superadmin'));   // the Admin tab is for the Superadmin only
 function renderMenu(){
   const done = {project:()=>P.name&&P.siteType, map:()=>M.img&&M.pxPerM&&M.closed, zone:()=>M.show.grid||M.show.brahma};
-  $('menu').innerHTML = MENU.map((s,i)=>`<button class="${s.id===cur.sec?'on':''}" data-s="${s.id}"><span class="num">${i+1}</span> ${t('m.'+s.id)}${done[s.id]&&done[s.id]()?` <span class="ok" title="${t('ui.done')}">&#10003;</span>`:''}</button>`).join('');
+  $('menu').innerHTML = MENU_V().map((s,i)=>`<button class="${s.id===cur.sec?'on':''}" data-s="${s.id}"><span class="num">${i+1}</span> ${t('m.'+s.id)}${done[s.id]&&done[s.id]()?` <span class="ok" title="${t('ui.done')}">&#10003;</span>`:''}</button>`).join('');
   $('menu').querySelectorAll('button').forEach(b=>b.onclick=()=>go(b.dataset.s, MENU.find(s=>s.id===b.dataset.s).subs[0].id));
   const sec = MENU.find(s=>s.id===cur.sec);
   $('sub').innerHTML = `<input id="qs" type="search" placeholder="${t('ui.search')}"><div id="qres"></div><div id="slist">` + sec.subs.map(u=>`<button class="${u.id===cur.sub?'on':''} ${!PANELS[sec.id+'/'+u.id]?'soon':''}" data-u="${u.id}">${t('s.'+u.id)}${!PANELS[sec.id+'/'+u.id]?` <span class="tag">${t('ui.stage',{n:u.stage})}</span>`:''}</button>`).join('') + '</div>';
   $('slist').querySelectorAll('button').forEach(b=>b.onclick=()=>go(cur.sec,b.dataset.u));
   $('qs').oninput = e => {
     const q = e.target.value.trim().toLowerCase(), r = [];
-    if(q) MENU.forEach(s=>s.subs.forEach(u=>{ if((t('s.'+u.id)+' '+t('m.'+s.id)).toLowerCase().includes(q)) r.push([s,u]); }));
+    if(q) MENU_V().forEach(s=>s.subs.forEach(u=>{ if((t('s.'+u.id)+' '+t('m.'+s.id)).toLowerCase().includes(q)) r.push([s,u]); }));
     $('qres').innerHTML = !q ? '' : r.length ? r.map(([s,u])=>`<button data-s="${s.id}" data-u="${u.id}">${t('m.'+s.id)} &rsaquo; ${t('s.'+u.id)}</button>`).join('') : `<span class="tag">${t('ui.nores')}</span>`;
     $('qres').querySelectorAll('button').forEach(b=>b.onclick=()=>go(b.dataset.s,b.dataset.u));
   };
 }
 // Next step in the journey: next sub-menu, or first sub-menu of the next section.
 function nextStep(){
-  const si = MENU.findIndex(s=>s.id===cur.sec), sec = MENU[si], ui = sec.subs.findIndex(u=>u.id===cur.sub);
+  const MV=MENU_V(), si = MV.findIndex(s=>s.id===cur.sec), sec = MV[si], ui = sec.subs.findIndex(u=>u.id===cur.sub);
   if(ui < sec.subs.length-1) go(sec.id, sec.subs[ui+1].id);
-  else if(si < MENU.length-1) go(MENU[si+1].id, MENU[si+1].subs[0].id);
+  else if(si < MV.length-1) go(MV[si+1].id, MV[si+1].subs[0].id);
 }
 function go(sec, sub){ cur={sec,sub}; M.mode='view'; M.roomPts=[]; M.featPts=[]; M.annoDraft=null; M.annoSel=-1; M.cv.style.touchAction='auto'; ctxClose(); M.draw(); renderMenu(); renderPanel(); renderMapTools(); }
 
@@ -140,7 +141,13 @@ function renderMapTools(){
 
 const modeBtn = (m,l)=>`<button class="btn ${M.mode===m?'on':''}" onclick="setMode('${m}')">${t(l)}</button>`;
 function setMode(m){ M.mode = M.mode===m?'view':m; if(m==='room') M.roomPts=[]; if(m==='boundary'&&M.mode==='boundary'){M.poly=[];M.closed=false;} M.draw(); renderPanel(); }
-function toast(k){ $('zoneinfo').textContent = t(k); }
+// A message that floats at the bottom of the screen for a few seconds (the line under the map is often out of view).
+let _toastT=null;
+function toast(k,v){
+  const msg=t(k,v); $('zoneinfo').textContent=msg;
+  let b=document.getElementById('toastbox'); if(!b){ b=document.createElement('div'); b.id='toastbox'; b.setAttribute('role','status'); document.body.append(b); }
+  b.textContent=msg; b.className='toastbox show'; clearTimeout(_toastT); _toastT=setTimeout(()=>{ b.className='toastbox'; },4000);
+}
 
 const PANELS = {
   'project/new': ()=>`<h2>${t('s.new')}</h2><label>${t('p.pname')}</label><input type="text" id="pname" value="${esc(P.name)}">
@@ -254,6 +261,8 @@ const PANELS = {
   'astro/graha': ()=>grahaPanel(),
   'astro/chart': ()=>chartPanel(),
   'astro/areport': ()=>areportPanel(),
+  'admin/accounts': ()=>adminOnly(adminAccounts),
+  'admin/security': ()=>adminOnly(adminSecurity),
   'astro/houses': ()=>housesPanel(),
   'astro/audit': ()=>auditPanel(),
   'map/alloc': ()=>allocPanel(),
@@ -918,7 +927,7 @@ function saveProject(){
 function openProject(f){
   safeTextFile(f, LIMITS.project, txt=>{
     const d = sanitizeProject(safeJSON(txt)); if(!d){ toast('sec.badproj'); return; }
-    Object.keys(P).forEach(k=>delete P[k]); Object.assign(P,d.P); Object.assign(M,d.map);
+    Object.keys(P).forEach(k=>delete P[k]); Object.assign(P,d.P); curChart=-1; Object.assign(M,d.map);
     M.annoUndo=[]; M.annoRedo=[]; M.annoSel=-1; M.windFrom = P.windFrom==='' ? null : +P.windFrom;
     if(P.imgData) M.setImage(P.imgData, renderMapTools); else M.draw(); refreshAll(); toast('p.loaded'); });
 }
@@ -1167,7 +1176,7 @@ function chartPanel(){
     + `<tr><td>${t('c.asc')}</td><td>${RASHI[res.asc.sign]}</td><td>${dms(res.asc.deg)}</td><td>1</td><td>${res.asc.nak}</td></tr>`
     + GRAHAS.map(g=>{ const p=res.pos[g]; return `<tr><td>${t('gr.'+g)}${p.retro?' (R)':''}</td><td>${RASHI[p.sign]}</td><td>${dms(p.deg)}</td><td>${p.house}</td><td>${p.nak}-${p.pada}</td></tr>`; }).join('')+`</table>`;
   h+=`<div class="hint"><small>${t('c.retro')}${notes.length?'<br>'+notes.map(esc).join('<br>'):''}</small></div>`;
-  h+=`<button class="btn" onclick="astroChartCopy()">${t('c.copy')}</button><button class="btn alt" onclick="chartSave()">${t('a.savechart')}</button><button class="btn alt" onclick="astroReport()">${t('a.build')}</button><div class="hint"><small>${t('p.astronote')}</small></div>`;
+  h+=`<button class="btn" onclick="astroChartCopy()">${t('c.copy')}</button><button class="btn alt" onclick="astroReport()">${t('a.build')}</button>${chartList()}<div class="hint"><small>${t('p.astronote')}</small></div>`;
   return h;
 }
 function astroChartCopy(){
@@ -1176,19 +1185,37 @@ function astroChartCopy(){
   toast('c.copied');
 }
 /* ---------- Saved charts and the page-wise Astro-Vastu report ---------- */
-function chartSave(){
-  const a=P.astro||{}; if(!a.date){ toast('c.needsave'); return; } P.charts=P.charts||[]; if(P.charts.length>=50){ toast('c.needsave'); return; }
-  P.charts.push({label:sStr((a.name||'-')+' · '+birthDateShow()+(a.city?' · '+a.city:''),120), data:sAstro(JSON.parse(JSON.stringify(a)))}); toast('c.savedok'); renderPanel();
+let curChart=-1;   // index of the saved chart now open for editing, or -1
+const chartLabel = a => sStr((a.name||'-')+' · '+birthDateShow()+(a.city?' · '+a.city:''),120);
+function chartSave(){            // save as a new chart
+  const a=P.astro||{}; if(!a.date){ toast('c.needsave'); return; } P.charts=P.charts||[]; if(P.charts.length>=50){ toast('c.full'); return; }
+  P.charts.push({label:chartLabel(a), data:sAstro(JSON.parse(JSON.stringify(a)))}); curChart=P.charts.length-1; toast('c.savedok'); renderPanel();
 }
-function chartOpen(i){ const c=(P.charts||[])[i]; if(!c) return; P.astro=sAstro(c.data); toast('c.opened'); renderPanel(); }
-function chartDel(i){ askConfirm(t('p.confirmclear'),()=>{ (P.charts||[]).splice(i,1); renderPanel(); }); }
+function chartUpdate(){          // write the edits back into the chart that is open
+  const c=(P.charts||[])[curChart], a=P.astro||{}; if(!c||!a.date){ toast('c.needsave'); return; }
+  c.data=sAstro(JSON.parse(JSON.stringify(a))); if(!c.custom) c.label=chartLabel(a); toast('c.updated'); renderPanel();
+}
+function chartOpen(i,toBirth){ const c=(P.charts||[])[i]; if(!c) return; P.astro=sAstro(c.data); curChart=i; toast('c.opened'); if(toBirth) go('astro','birth'); else renderPanel(); }
+function chartRename(i,v){ const c=(P.charts||[])[i]; if(!c) return; c.label=sStr(v,120)||chartLabel(c.data); c.custom=true; }
+function chartDel(i){ askConfirm(t('p.confirmclear'),()=>{ (P.charts||[]).splice(i,1); if(curChart===i) curChart=-1; else if(curChart>i) curChart--; toast('c.deleted'); renderPanel(); }); }
+function chartNew(){ curChart=-1; P.astro={houses:{}}; renderPanel(); }
+// The list of saved charts: Edit loads one into Birth details, Report builds its pages, the name can be changed.
+let chartPer=5, chartPg=0;   // how many saved charts to show on a page, and which page
+function chartPerSet(v){ chartPer=[5,10,20].includes(+v)?+v:5; chartPg=0; renderPanel(); }
+function chartPage(d){ const n=Math.max(1,Math.ceil((P.charts||[]).length/chartPer)); chartPg=Math.min(n-1,Math.max(0,chartPg+d)); renderPanel(); }
+function chartList(){
+  const ch=P.charts||[], pages=Math.max(1,Math.ceil(ch.length/chartPer)); if(chartPg>=pages) chartPg=pages-1;
+  const from=chartPg*chartPer, shown=ch.map((c,i)=>[c,i]).slice(from,from+chartPer);
+  let h=`<h3 style="margin-top:1rem">${t('a.charts')} (${ch.length})</h3>`;
+  if(ch.length>5) h+=`<div style="display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-bottom:.3rem"><label style="margin:0;font-weight:400">${t('a.show')}</label><select style="width:auto" onchange="chartPerSet(this.value)">${[5,10,20].map(n=>`<option ${n===chartPer?'selected':''}>${n}</option>`).join('')}</select>
+    <button class="btn alt" style="margin:0" ${chartPg<=0?'disabled':''} onclick="chartPage(-1)">&lsaquo; ${t('a.prev')}</button><span>${t('a.pn',{n:chartPg+1,m:pages})}</span><button class="btn alt" style="margin:0" ${chartPg>=pages-1?'disabled':''} onclick="chartPage(1)">${t('a.next')} &rsaquo;</button></div>`;
+  h+=ch.length?`<table class="ztab">${shown.map(([c,i])=>`<tr><td><input type="text" style="width:100%;${i===curChart?'border-color:var(--acc);font-weight:700':''}" value="${esc(c.label)}" onchange="chartRename(${i},this.value)"></td>
+    <td style="white-space:nowrap"><button class="btn alt" style="margin:0" onclick="chartOpen(${i},true)">${t('a.edit')}</button> <button class="btn alt" style="margin:0" onclick="chartOpen(${i});astroReport()">${t('a.rpt')}</button> <button class="btn alt" style="margin:0" onclick="chartDel(${i})">${t('a.del')}</button></td></tr>`).join('')}</table>`:`<div class="hint">${t('a.nonec')}</div>`;
+  h+=`<div style="margin-top:.4rem">${curChart>=0&&ch[curChart]?`<button class="btn" onclick="chartUpdate()">${t('a.update')}</button>`:''}<button class="btn alt" onclick="chartSave()">${t('a.savechart')}</button><button class="btn alt" onclick="chartNew()">${t('a.newchart')}</button></div>`;
+  return h+`<div class="hint"><small>${t('a.saveproj')}</small></div>`;
+}
 function areportPanel(){
-  const ch=P.charts||[];
-  return `<h2>${t('s.areport')}</h2><p>${t('a.rinfo')}</p>
-    <button class="btn" onclick="astroReport()">${t('a.build')}</button><button class="btn alt" onclick="chartSave()">${t('a.savechart')}</button>
-    <h3 style="margin-top:1rem">${t('a.charts')}</h3>
-    ${ch.length?`<table class="ztab">${ch.map((c,i)=>`<tr><td>${esc(c.label)}</td><td><button class="btn alt" style="margin:0" onclick="chartOpen(${i})">${t('a.open')}</button> <button class="btn alt" style="margin:0" onclick="chartDel(${i})">${t('a.del')}</button></td></tr>`).join('')}</table>`:`<div class="hint">${t('a.nonec')}</div>`}
-    <div class="hint"><small>${t('a.saveproj')}</small></div>`;
+  return `<h2>${t('s.areport')}</h2><p>${t('a.rinfo')}</p><button class="btn" onclick="astroReport()">${t('a.build')}</button>${chartList()}`;
 }
 function astroReport(){
   const res=astroCalc(); if(!res||res.err){ toast('c.need'); return; }
@@ -1328,7 +1355,8 @@ function birthPanel(){
     <div class="hint"><small>${t('b.setnote')}</small></div>
   </div>
   <div class="sec"><label>${t('b.notes')}</label><textarea rows="4" style="width:100%;padding:.45rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit" placeholder="${t('b.notesph')}" onchange="astroSet('notes',this.value)">${esc(a.notes)}</textarea>
-    <button class="btn" onclick="toast('b.saved')">${t('b.save')}</button><button class="btn alt" onclick="birthClear()">${t('b.clear')}</button></div>
+    <button class="btn" onclick="${curChart>=0&&(P.charts||[])[curChart]?'chartUpdate()':'chartSave()'}">${t('b.save')}</button><button class="btn alt" onclick="birthClear()">${t('b.clear')}</button></div>
+  <div class="sec">${chartList()}</div>
   <div class="hint"><small>${t('p.astroprivacy')}</small></div>`;
 }
 function grahaPanel(){
@@ -1418,6 +1446,161 @@ function ssTemples(){
 }
 Object.assign(DIAG,{ssBook, ssMap, ssTown, ssTemples});
 
+/* ---------- Sign-in: a privacy lock on this device ----------
+   There is no server. Accounts, approvals and sessions live in this browser only, so this is a lock, not shared security.
+   Passwords are never stored: only a salted PBKDF2-SHA256 hash (150,000 rounds). Anyone may look around and see sample data;
+   any action (typing, buttons, drawing on the map) asks for a login. The Superadmin approves registrations on this device. */
+const AUTH_KEY='vs.auth', SESS_KEY='vs.sess', ROLE_RANK={user:1,researcher:2,superadmin:3}, RESEARCH_ONLY=['report/brand','tools/cert','remedy/rem','lib/rules'];
+let SESSION=null, authMode='in';
+// Password rule: at least 8 characters with a letter, a digit, an uppercase letter and a special character.
+const pwOk = p => typeof p==='string' && p.length>=8 && p.length<=200 && /\p{L}/u.test(p) && /\d/.test(p) && /\p{Lu}/u.test(p) && /[^\p{L}\d\s]/u.test(p);
+const b64=u=>btoa(String.fromCharCode(...u)), unb64=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0)), B64OK=/^[A-Za-z0-9+\/=]{20,64}$/, UNAME=/^[a-z0-9._-]{3,32}$/;
+async function pwHash(pw,saltB64){
+  const salt=saltB64?unb64(saltB64):crypto.getRandomValues(new Uint8Array(16)), key=await crypto.subtle.importKey('raw',new TextEncoder().encode(String(pw).slice(0,200)),'PBKDF2',false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:150000,hash:'SHA-256'},key,256); return {salt:b64(salt),hash:b64(new Uint8Array(bits))};
+}
+function authDB(){
+  const d=safeJSON(store.get(AUTH_KEY,'null')), o={su:null,users:[],fails:0,lockUntil:0}; if(!d||typeof d!=='object') return o;
+  if(d.su&&UNAME.test(d.su.u)&&B64OK.test(d.su.salt)&&B64OK.test(d.su.hash)) o.su={u:d.su.u,salt:d.su.salt,hash:d.su.hash,rsalt:B64OK.test(d.su.rsalt)?d.su.rsalt:'',rhash:B64OK.test(d.su.rhash)?d.su.rhash:''};
+  o.users=(Array.isArray(d.users)?d.users:[]).slice(0,200).map(x=>x&&UNAME.test(x.u)&&B64OK.test(x.salt)&&B64OK.test(x.hash)&&['user','researcher'].includes(x.role)&&['pending','approved','suspended'].includes(x.status)&&/^[0-9a-f]{8,32}$/.test(x.id)?{id:x.id,u:x.u,role:x.role,status:x.status,salt:x.salt,hash:x.hash,at:sNum(x.at,0,9e15,0)}:null).filter(Boolean);
+  o.fails=sNum(d.fails,0,100,0); o.lockUntil=sNum(d.lockUntil,0,9e15,0); return o;
+}
+const authSave = db => store.set(AUTH_KEY, JSON.stringify(db));
+const signedIn = () => !!SESSION;
+function browserName(){ const u=navigator.userAgent; if(/Edg\//.test(u)) return 'Edge'; if(/OPR\/|Opera|Firefox|FxiOS|SamsungBrowser|Brave/.test(u)) return 'Other'; if(/Chrome\/|CriOS\//.test(u)) return 'Chrome'; if(/Safari\//.test(u)&&/Version\//.test(u)) return 'Safari'; return 'Other'; }
+function authStart(w,keep){
+  SESSION={id:w.id,u:w.u,role:w.role}; const s=JSON.stringify({...SESSION,exp:Date.now()+(keep?30*864e5:12*36e5)});
+  try{ sessionStorage.removeItem(SESS_KEY); localStorage.removeItem(SESS_KEY); (keep?localStorage:sessionStorage).setItem(SESS_KEY,s); }catch(e){}
+  authChrome();
+}
+function authRestore(){
+  let d=null; try{ d=safeJSON(sessionStorage.getItem(SESS_KEY)||localStorage.getItem(SESS_KEY)||'null'); }catch(e){} if(!d||!(d.exp>Date.now())) return;
+  const db=authDB(); if(d.role==='superadmin'){ if(db.su&&db.su.u===d.u) SESSION={id:'su',u:d.u,role:'superadmin'}; }
+  else { const x=db.users.find(y=>y.id===d.id&&y.u===d.u&&y.status==='approved'&&y.role===d.role); if(x) SESSION={id:x.id,u:x.u,role:x.role}; }
+}
+function authOut(){ SESSION=null; try{ sessionStorage.removeItem(SESS_KEY); localStorage.removeItem(SESS_KEY); }catch(e){}
+  if(cur.sec==='admin') go(MENU[0].id,MENU[0].subs[0].id); else renderMenu(); authChrome(); toast('au.out'); }
+function authChrome(){
+  const b=$('authbtn'); if(!b) return; b.textContent = SESSION ? (SESSION.u+' · '+t('au.out')) : t('au.signin'); b.title = SESSION ? t('au.signedas',{u:SESSION.u,r:t('au.role.'+SESSION.role)}) : t('au.signin');
+  const a=$('adminbtn'); if(a){ a.style.display = SESSION&&SESSION.role==='superadmin' ? '' : 'none'; a.textContent=t('au.admin'); }
+}
+function authBtn(){ if(SESSION) authOut(); else authOpen(); }
+function authMsg(k,v){ const m=$('au_msg'); if(m){ m.textContent=t(k,v); m.style.display='block'; } }
+function authClose(){ const o=$('authbox'); if(o) o.remove(); }
+function authOpen(mode){
+  authMode=mode||authMode||'in'; authClose(); const db=authDB(), br=browserName();
+  const w=document.createElement('div'); w.id='authbox'; w.className='askbox';
+  const setup=(authMode==='setup'), reg=(authMode==='reg'), rec=(authMode==='rec'); let h=`<div class="askcard authcard"><div style="text-align:center"><div class="authlogo">VastuSense</div><small>VastuSutras by Anoopam</small></div>
+    <div class="rp-sm" style="text-align:center;margin:.6rem 0 .3rem">${t('au.browsers')}</div>
+    <div class="brs">${['Chrome','Edge','Safari'].map(b=>`<span class="br ${b===br?'on':''}">${b===br?'&#10003; ':''}${b==='Edge'?'Microsoft Edge':b==='Chrome'?'Google Chrome':'Safari'}</span>`).join('')}</div>
+    <div class="rp-sm" style="text-align:center">${br==='Other'?t('au.br.other',{b:esc(navigator.userAgentData&&navigator.userAgentData.brands?navigator.userAgentData.brands.map(x=>x.brand).filter(x=>!/Not.?A/i.test(x)).join('/'):'?')}):t('au.br.ok',{b:br})} ${t('au.br.note')}</div>
+    <div style="text-align:center;margin:.7rem 0"><button class="btn ${authMode==='in'?'':'alt'}" onclick="authOpen('in')">${t('au.signin')}</button><button class="btn ${reg?'':'alt'}" onclick="authOpen('reg')">${t('au.create')}</button></div>
+    <div class="rp-sm" style="text-align:center">${t(setup?'au.setupinfo':reg?'au.welcome2':rec?'au.recinfo':'au.welcome')}</div>`;
+  if(!reg&&!setup&&!rec) h+=`<label>${t('au.as')}</label><select id="au_role" onchange="authRoleChange()"><option value="superadmin">${t('au.role.superadmin')}</option><option value="researcher">${t('au.role.researcher')}</option><option value="user">${t('au.role.user')}</option></select>`;
+  if(reg) h+=`<label>${t('au.as')}</label><select id="au_role"><option value="user">${t('au.role.user')}</option><option value="researcher">${t('au.role.researcher')}</option></select>`;
+  h+=`<label>${t('au.user')}</label><input type="text" id="au_user" autocomplete="username" maxlength="32" autocapitalize="none" spellcheck="false">`;
+  if(rec) h+=`<label>${t('au.key')}</label><input type="text" id="au_key" maxlength="40" autocapitalize="characters" spellcheck="false" placeholder="XXXXX-XXXXX-XXXXX-XXXXX">`;
+  h+=`<label>${t(rec?'au.newpass':'au.pass')}</label><input type="password" id="au_pass" autocomplete="${reg||setup||rec?'new-password':'current-password'}" maxlength="200">`;
+  if(reg||setup||rec) h+=`<div class="rp-sm">${t('au.policy')}</div><label>${t('au.pass2')}</label><input type="password" id="au_pass2" autocomplete="new-password" maxlength="200">`;
+  h+=`<div style="margin:.4rem 0"><label class="chk"><input type="checkbox" onchange="['au_pass','au_pass2'].forEach(i=>{const e=$(i);if(e)e.type=this.checked?'text':'password'})"> ${t('au.show')}</label>${reg||rec?'':`<label class="chk"><input type="checkbox" id="au_keep"> ${t('au.keep')}</label>`}</div>
+    <div id="au_msg" class="rp-warn" style="display:none"></div>
+    <button class="btn" style="width:100%;margin:.4rem 0" onclick="${setup?'authSetup()':reg?'authRegister()':rec?'authRecover()':'authSignIn()'}">${t(setup?'au.setup':reg?'au.create':rec?'au.recover':'au.signin')}</button>
+    <div style="text-align:center"><a href="#" onclick="event.preventDefault();authForgot()">${t('au.forgot')}</a> &middot; <a href="#" onclick="event.preventDefault();authClose()">${t('rp.close')}</a></div>
+    <p class="rp-sm">${t('au.free')}</p><p class="rp-sm">${t('au.lock')}</p>
+    <div class="trustbox"><b>${t('au.trust')}</b><br>${t('au.trusttxt')}</div></div>`;
+  w.innerHTML=h; document.body.append(w); const u=$('au_user'); if(u) u.focus();
+  w.querySelectorAll('input[type=text],input[type=password]').forEach(i=>i.onkeydown=e=>{ if(e.key==='Enter'){ (setup?authSetup:reg?authRegister:rec?authRecover:authSignIn)(); } });
+  if(!reg&&!setup&&!rec){ $('au_role').value=store.get('vs.lastrole','user')==='superadmin'&&db.su?'superadmin':(['superadmin','researcher','user'].includes(store.get('vs.lastrole','user'))?store.get('vs.lastrole','user'):'user'); authRoleChange(); }
+}
+function authRoleChange(){ const r=$('au_role'); if(!r||authMode!=='in') return; if(r.value==='superadmin'&&!authDB().su) authOpen('setup'); }
+async function authSignIn(){
+  const role=$('au_role').value, u=$('au_user').value.trim().toLowerCase(), pw=$('au_pass').value, keep=$('au_keep')&&$('au_keep').checked, db=authDB();
+  if(Date.now()<db.lockUntil){ authMsg('au.locked'); return; }
+  let ok=false, who=null, why='au.bad';
+  if(role==='superadmin'){ if(!db.su){ authMsg('au.nosu'); return; } const h=await pwHash(pw,db.su.salt); if(db.su.u===u&&h.hash===db.su.hash){ ok=true; who={id:'su',u,role:'superadmin'}; } }
+  else { const x=db.users.find(y=>y.u===u), h=await pwHash(pw,x?x.salt:null);
+    if(x&&h.hash===x.hash&&x.role===role){ if(x.status==='pending') why='au.pending'; else if(x.status!=='approved') why='au.suspended'; else { ok=true; who={id:x.id,u,role:x.role}; } } }
+  if(!ok){ if(why==='au.bad'){ db.fails++; if(db.fails>=5){ db.fails=0; db.lockUntil=Date.now()+30000; } authSave(db); } authMsg(why); return; }
+  db.fails=0; authSave(db); store.set('vs.lastrole',role); authStart(who,keep); authClose(); toast('au.signedas',{u:u,r:t('au.role.'+role)}); renderMenu(); renderPanel();
+}
+async function authSetup(){
+  const u=$('au_user').value.trim().toLowerCase(), p=$('au_pass').value, p2=$('au_pass2').value, db=authDB();
+  if(db.su){ authOpen('in'); return; } if(!UNAME.test(u)){ authMsg('au.baduser'); return; } if(!pwOk(p)){ authMsg('au.policy'); return; } if(p!==p2){ authMsg('au.mismatch'); return; }
+  const h=await pwHash(p); db.su={u,salt:h.salt,hash:h.hash,rsalt:'',rhash:''}; const key=await authSetKey(db); authSave(db); authStart({id:'su',u,role:'superadmin'},false); authClose(); authShowKey(key); renderMenu(); renderPanel();
+}
+// ---- Superadmin recovery key. It is made on this device when the Superadmin is created, shown once, and only its hash is kept.
+// (A key written into the app's code would be public on GitHub, so it is generated per device instead.)
+function genKey(){ const A='ABCDEFGHJKLMNPQRSTUVWXYZ23456789', r=crypto.getRandomValues(new Uint8Array(20)); return [0,5,10,15].map(i=>[...r.slice(i,i+5)].map(x=>A[x%32]).join('')).join('-'); }
+const normKey = s => String(s||'').toUpperCase().replace(/[^A-Z0-9]/g,'');
+async function authSetKey(db){ const k=genKey(), h=await pwHash(normKey(k)); db.su.rsalt=h.salt; db.su.rhash=h.hash; return k; }
+function authShowKey(key){
+  authClose(); const w=document.createElement('div'); w.id='authbox'; w.className='askbox';
+  w.innerHTML=`<div class="askcard authcard"><h3 style="margin:0 0 .4rem">${t('au.keytitle')}</h3><p>${t('au.keyinfo')}</p><div class="keybox" id="au_keyshow">${esc(key)}</div>
+    <button class="btn alt" onclick="navigator.clipboard&&navigator.clipboard.writeText($('au_keyshow').textContent).then(()=>toast('au.copied'))">${t('au.copy')}</button><button class="btn alt" onclick="window.print()">${t('rp.print')}</button>
+    <label class="chk"><input type="checkbox" onchange="$('au_keyok').disabled=!this.checked"> ${t('au.keysaved')}</label><button class="btn" id="au_keyok" disabled onclick="authClose();toast('au.setupok')">${t('au.adm.done')}</button></div>`;
+  document.body.append(w);
+}
+async function authRecover(){
+  const u=$('au_user').value.trim().toLowerCase(), key=normKey($('au_key').value), p=$('au_pass').value, p2=$('au_pass2').value, db=authDB();
+  if(Date.now()<db.lockUntil){ authMsg('au.locked'); return; } if(!db.su||!db.su.rhash){ authMsg('au.nokey'); return; }
+  if(!pwOk(p)){ authMsg('au.policy'); return; } if(p!==p2){ authMsg('au.mismatch'); return; }
+  const h=await pwHash(key,db.su.rsalt);
+  if(db.su.u!==u||h.hash!==db.su.rhash){ db.fails++; if(db.fails>=5){ db.fails=0; db.lockUntil=Date.now()+30000; } authSave(db); authMsg('au.badkey'); return; }
+  const np=await pwHash(p); db.su.salt=np.salt; db.su.hash=np.hash; const nk=await authSetKey(db); db.fails=0; authSave(db);
+  authStart({id:'su',u,role:'superadmin'},false); authClose(); authShowKey(nk); renderMenu(); renderPanel();
+}
+function authForgot(){ const r=$('au_role'); if(r&&r.value==='superadmin') authOpen('rec'); else authMsg('au.forgotinfo'); }
+async function authNewKey(){ if(!SESSION||SESSION.role!=='superadmin') return; const db=authDB(); if(!db.su) return; const k=await authSetKey(db); authSave(db); authShowKey(k); }
+async function authRegister(){
+  const role=$('au_role').value, u=$('au_user').value.trim().toLowerCase(), p=$('au_pass').value, p2=$('au_pass2').value, db=authDB();
+  if(!['user','researcher'].includes(role)) return; if(!UNAME.test(u)){ authMsg('au.baduser'); return; } if(!pwOk(p)){ authMsg('au.policy'); return; } if(p!==p2){ authMsg('au.mismatch'); return; }
+  if((db.su&&db.su.u===u)||db.users.some(x=>x.u===u)){ authMsg('au.exists'); return; } if(db.users.length>=200){ authMsg('au.exists'); return; }
+  const h=await pwHash(p), id=[...crypto.getRandomValues(new Uint8Array(8))].map(x=>x.toString(16).padStart(2,'0')).join('');
+  db.users.push({id,u,role,status:'pending',salt:h.salt,hash:h.hash,at:Date.now()}); authSave(db); authMsg('au.requested'); $('au_pass').value=$('au_pass2').value='';
+}
+// ---- Superadmin: approve registrations and manage logins
+function authAdmin(){ go('admin','accounts'); }
+const adminOnly = f => (SESSION&&SESSION.role==='superadmin') ? f() : `<h2>${t('m.admin')}</h2><div class="hint">${t('au.adm.only')}</div>`;
+function adminSecurity(){
+  const db=authDB();
+  return `<h2>${t('s.security')}</h2><p>${t('au.sec.info')}</p>
+    <table class="ztab"><tr><td><b>${t('au.user')}</b></td><td>${esc(db.su?db.su.u:'')}</td></tr><tr><td><b>${t('au.key')}</b></td><td>${db.su&&db.su.rhash?t('au.key.set'):t('au.key.none')}</td></tr></table>
+    <button class="btn" onclick="authAct('su','reset')">${t('au.adm.mypw')}</button><button class="btn alt" onclick="authNewKey()">${t('au.newkey')}</button>
+    <div class="hint"><small>${t('au.keywhy')}</small></div>`;
+}
+function adminAccounts(){
+  const db=authDB();
+  const row=x=>`<tr><td><b>${esc(x.u)}</b><br><small>${t('au.role.'+x.role)} &middot; ${t('au.status.'+x.status)}</small></td><td style="white-space:nowrap">${x.status==='pending'?`<button class="btn" style="margin:0" onclick="authAct('${x.id}','approve')">${t('au.adm.approve')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','del')">${t('au.adm.reject')}</button>`
+    :`<button class="btn alt" style="margin:0" onclick="authAct('${x.id}','${x.status==='approved'?'suspend':'approve'}')">${t(x.status==='approved'?'au.adm.suspend':'au.adm.restore')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','reset')">${t('au.adm.reset')}</button> <button class="btn alt" style="margin:0" onclick="authAct('${x.id}','del')">${t('au.adm.del')}</button>`}</td></tr>`;
+  const pend=db.users.filter(x=>x.status==='pending'), rest=db.users.filter(x=>x.status!=='pending');
+  return `<h2>${t('m.admin')}</h2><p>${t('au.adm.info')}</p><b>${t('au.adm.pending')} (${pend.length})</b>${pend.length?`<table class="ztab">${pend.map(row).join('')}</table>`:`<div class="rp-sm">${t('au.adm.none')}</div>`}
+    <p></p><b>${t('au.adm.title')} (${rest.length})</b>${rest.length?`<table class="ztab">${rest.map(row).join('')}</table>`:`<div class="rp-sm">${t('au.adm.none')}</div>`}
+    <p class="rp-sm">${t('au.lock')}</p>`;
+}
+function authAct(id,act){
+  if(!SESSION||SESSION.role!=='superadmin') return; const db=authDB();
+  if(act==='reset'){ askText(t('au.adm.newpw',{n:8}),'',async v=>{ const db2=authDB(); if(!pwOk(v)){ toast('au.policy'); return; } const h=await pwHash(v);
+      if(id==='su'){ db2.su.salt=h.salt; db2.su.hash=h.hash; } else { const x=db2.users.find(y=>y.id===id); if(!x) return; x.salt=h.salt; x.hash=h.hash; } authSave(db2); toast('au.adm.done'); renderPanel(); }); return; }
+  const x=db.users.find(y=>y.id===id); if(!x) return;
+  if(act==='approve') x.status='approved'; else if(act==='suspend') x.status='suspended'; else if(act==='del') db.users.splice(db.users.indexOf(x),1);
+  authSave(db); renderPanel();
+}
+// ---- The gate: before anyone is signed in, anything that changes something asks for a login. Looking around stays free.
+function authGuard(e){
+  const el=e.target; if(!el||!el.closest) return; if(el.closest('#authbox,#askbox,#toastbox,.top,#menu,#sub,#reportview,#ctxmenu')) return;
+  const inPanel=el.closest('#panel'), onMap=el.closest('#map'); if(!inPanel&&!onMap) return;
+  const key=cur.sec+'/'+cur.sub; if(inPanel){ if(!el.closest('input,select,textarea,button,summary,label,a,[onclick]')) return; if(cur.sec==='lib'&&key!=='lib/rules') return; }
+  if(SESSION){ if(ROLE_RANK[SESSION.role]<2&&RESEARCH_ONLY.includes(key)&&inPanel){ e.preventDefault(); e.stopImmediatePropagation(); if(e.type==='click') toast('au.needres'); } return; }
+  e.preventDefault(); e.stopImmediatePropagation(); if(e.type==='click'||e.type==='pointerdown'||e.type==='contextmenu') { if(!$('authbox')){ toast('au.need'); authOpen('in'); } }
+}
+['pointerdown','click','dblclick','contextmenu','keydown','input','change','paste','drop'].forEach(ev=>document.addEventListener(ev,authGuard,true));
+// What a visitor sees before signing in: sample data in place of an empty page.
+function authPrefill(){
+  if(SESSION||P.astro&&P.astro.date) return;
+  P.astro=sAstro({name:'Sample native',gender:'',date:'1985-08-15',hr:'6',mi:'30',se:'0',country:'IN',state:'Madhya Pradesh',city:'Indore',lat:'22.719',lon:'75.857',tz:'Asia/Kolkata',ayan:'lahiri',node:'mean',hsys:'whole',houses:{}});
+  if(!M.img){ M.sample(); }
+}
+
 /* ---------- start ---------- */
 M.onContext = ctxOpen;
 M.onChange = ()=>{ renderMapTools(); if(cur.sec==='map') renderPanel(); };
@@ -1429,5 +1612,5 @@ $('fup').onclick = () => { fontPct = Math.min(160, fontPct+10); applyFont(); };
 loadBrand(); loadAbout();
 setLang(sEnum(store.get('vs.lang','en'), LANGS.map(l=>l[0]), 'en'));
 applyTheme(sEnum(store.get('vs.theme','light'), ['light','dark'], 'light')); applyFont();
-M.init(); refreshAll();
+M.init(); authRestore(); authPrefill(); refreshAll();
 if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});
