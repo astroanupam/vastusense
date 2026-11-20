@@ -1,14 +1,101 @@
 const P = {name:'', siteType:'', client:'', phone:'', address:'', imgData:null};
 let cur = {sec:'map', sub:'upload'};
 const $ = id => document.getElementById(id);
-const esc = s => String(s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = s => String(s==null?'':s).replace(/[&<>"'`]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'}[c]));
 const store = {
   get(k,d){ try{ const v = localStorage.getItem(k); return v===null?d:v; }catch(e){ return d; } },
   set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} }
 };
 
+/* ---------- security: validation of everything that comes from outside ---------- */
+// Anything typed, uploaded or loaded from a file is untrusted. Text is escaped when shown (esc), and files are rebuilt
+// from a whitelist (sanitizeProject) so unknown keys, odd types, scripts and external links never reach the page.
+const LIMITS = {project:25*1024*1024, small:2*1024*1024, image:12*1024*1024, text:300, area:4000};
+const IMG_TYPES = ['image/png','image/jpeg','image/webp','image/gif'];
+const sStr = (v,max=LIMITS.text) => typeof v==='string' ? v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,'').slice(0,max) : '';
+const sNum = (v,min,max,def) => { const n=+v; return (typeof v==='number'||typeof v==='string') && v!=='' && isFinite(n) ? Math.min(max,Math.max(min,n)) : def; };
+const sNumStr = v => (typeof v==='string'||typeof v==='number') && /^-?\d{0,9}(\.\d{0,6})?$/.test(String(v)) ? String(v) : '';
+const sPt = p => Array.isArray(p) && p.length===2 && p.every(n=>typeof n==='number' && isFinite(n) && Math.abs(n)<1e5) ? [p[0],p[1]] : null;
+const sPts = (a,min,max) => { if(!Array.isArray(a)) return null; const r=a.slice(0,max).map(sPt); return r.every(Boolean)&&r.length>=min ? r : null; };
+const sEnum = (v,list,def) => list.includes(v) ? v : def;
+const sColor = (v,def) => typeof v==='string' && /^#[0-9a-fA-F]{6}$/.test(v) ? v : def;
+const sDataImg = (v,max=LIMITS.image*1.4) => typeof v==='string' && v.length<=max && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+\/=]+$/.test(v) ? v : '';
+const FEAT_OK = () => Object.keys(L).filter(k=>k.startsWith('f.')).map(k=>k.slice(2));
+const DIRS_OK = ['N','NE','E','SE','S','SW','W','NW','C'];
+const SITE_OK = () => SITE_TYPES.flatMap(g=>g.t);
+function sRules(a, kind){
+  if(!Array.isArray(a)) return [];
+  return a.slice(0,500).map(x=>{
+    if(!x||typeof x!=='object'||!ROOM_ALL.includes(x.room)) return null;
+    const dirs=k=>Array.isArray(x[k])?x[k].filter(d=>DIRS_OK.includes(d)).slice(0,9):[];
+    if(kind==='remedy'){ const text=sStr(x.text,1000); if(!text) return null;
+      return {room:x.room, dirs:dirs('dirs'), verdict:(Array.isArray(x.verdict)?x.verdict:[]).filter(v=>['prefer','ok','avoid','neutral'].includes(v)), category:sEnum(x.category,['layout','element','colour'],'other'), text, structural:x.structural===true, source:sStr(x.source,300), status:sEnum(x.status,['verified'],'unverified')}; }
+    return {room:x.room, prefer:dirs('prefer'), accept:dirs('accept'), avoid:dirs('avoid'), weight:sNum(x.weight,1,5,1), source:sStr(x.source,300), status:sEnum(x.status,['verified'],'unverified'),
+      applies:x.applies==='*'||!Array.isArray(x.applies)?'*':x.applies.filter(s=>SITE_OK().includes(s)), school:(Array.isArray(x.school)?x.school:[]).filter(s=>['vedic','bs','modern','maha','custom'].includes(s))};
+  }).filter(Boolean);
+}
+function sBrand(b){
+  if(!b||typeof b!=='object') return {};
+  const o={name:sStr(b.name,200),prep:sStr(b.prep,200),contact:sStr(b.contact,300),footer:sStr(b.footer,300)}; const lg=sDataImg(b.logo,600000); if(lg) o.logo=lg; return o;
+}
+// Rebuild a loaded project from a whitelist. Returns null when the file is not a project at all.
+function sanitizeProject(d){
+  if(!d||typeof d!=='object'||Array.isArray(d)||!d.P||typeof d.P!=='object') return null;
+  const s=d.P, m=(d.map&&typeof d.map==='object')?d.map:{}, P2={};
+  ['name','client','phone','address','soilNote','place','fireSrc'].forEach(k=>{ P2[k]=sStr(s[k]); });
+  P2.siteType=sEnum(s.siteType,SITE_OK(),''); P2.facing=sEnum(s.facing,DIRS_OK.slice(0,8),''); P2.school=sEnum(s.school,['vedic','bs','modern','maha','custom'],'');
+  P2.config=sEnum(s.config,['1 BHK','2 BHK','3 BHK','4 BHK+','Duplex','other'],''); P2.soil=sEnum(s.soil,['clay','sand','silt','gravel','rock','black','fill','unknown'],'');
+  ['bearing','decl','fireMax','windFrom'].forEach(k=>{ P2[k]=sNumStr(s[k]); }); P2.northOk=s.northOk===true; P2.showLC=s.showLC===true;
+  P2.imgData=sDataImg(s.imgData)||null;
+  P2.levels={}; if(s.levels&&typeof s.levels==='object') DIRS_OK.slice(0,8).concat([]).forEach(c=>{ P2.levels[c]=sNumStr(s.levels[c]); });
+  P2.water={}; P2.cool={}; P2.fresh={};
+  ['occ','lpcd','days'].forEach(k=>{ P2.water[k]=sNumStr((s.water||{})[k]); }); ['dens','div'].forEach(k=>{ P2.cool[k]=sNumStr((s.cool||{})[k]); }); ['occ','lps','area','lpsm2'].forEach(k=>{ P2.fresh[k]=sNumStr((s.fresh||{})[k]); });
+  P2.clear=(Array.isArray(s.clear)?s.clear:[]).slice(0,200).map(c=>c&&CLEAR_KINDS.includes(c.a)&&CLEAR_KINDS.includes(c.b)?{a:c.a,b:c.b,min:sNum(c.min,0,1e6,0),src:sStr(c.src,300)}:null).filter(Boolean);
+  P2.userRules=sRules(s.userRules,'rule'); P2.userRemedies=sRules(s.userRemedies,'remedy'); P2.brand=sBrand(s.brand);
+  P2.rpSel={}; RP_SECTIONS.forEach(k=>{ if(s.rpSel&&s.rpSel[k]===false) P2.rpSel[k]=false; });
+  P2.cert={name:sStr((s.cert||{}).name,200), ok:(s.cert||{}).ok===true};
+  const as=(s.astro&&typeof s.astro==='object')?s.astro:{};
+  P2.astro={name:sStr(as.name,120), date:/^\d{4}-\d{2}-\d{2}$/.test(as.date)?as.date:'', time:/^\d{2}:\d{2}$/.test(as.time)?as.time:'', place:sStr(as.place,160), asc:sEnum(as.asc,RASHI,''), dasha:sStr(as.dasha,80), houses:{}};
+  for(let h=1;h<=12;h++){ const o=(as.houses&&typeof as.houses==='object'&&as.houses[h])||{}; P2.astro.houses[h]={state:sEnum(o.state,['strong','weak','afflicted'],''), planets:sStr(o.planets,80)}; }
+  const map={northDeg:sNum(m.northDeg,-360,360,0), closed:m.closed===true, pxPerM:sNum(m.pxPerM,0,1e6,0), zsys:sEnum(m.zsys,[8,16,24,32],16)};
+  map.poly=sPts(m.poly,0,500)||[]; map.centre=sPt(m.centre);
+  map.devata=(Array.isArray(m.devata)&&m.devata.length===81)?m.devata.map(v=>sStr(v,60)):null;
+  map.rooms=(Array.isArray(m.rooms)?m.rooms:[]).slice(0,500).map(r=>{ const pts=r&&sPts(r.pts,3,400); return pts&&ROOM_TYPES.includes(r.type)?{type:r.type,pts,kw:sNumStr(r.kw),wm2:sNumStr(r.wm2)}:null; }).filter(Boolean);
+  const fk=FEAT_OK(); map.feats=(Array.isArray(m.feats)?m.feats:[]).slice(0,1000).map(f=>{ const pts=f&&sPts(f.pts,1,500); return pts&&fk.includes(f.kind)?{kind:f.kind,pts}:null; }).filter(Boolean);
+  const AT=['line','pencil','rect','square','circle','ellipse','tri','trap','text'];
+  map.annos=(Array.isArray(m.annos)?m.annos:[]).slice(0,2000).map(a=>{ const pts=a&&sPts(a.pts,1,5000); if(!pts||!AT.includes(a.type)) return null;
+    return {type:a.type, pts, stroke:sColor(a.stroke,'#d02'), fill:sColor(a.fill,'#ffd966'), fillMode:sEnum(a.fillMode,['none','light','solid'],'none'), w:sNum(a.w,1,20,3), dash:sEnum(a.dash,['solid','dash','dot','dd'],'solid'), size:sNum(a.size,6,80,14), text:sStr(a.text,500)}; }).filter(Boolean);
+  return {P:P2, map};
+}
+// Check a user-chosen image: type, size, and the real file signature (not just the name), then hand back a safe data URL.
+function safeImageFile(f, maxPx, cb, fail){
+  if(!f) return;
+  if(!IMG_TYPES.includes(f.type) || f.size>LIMITS.image || f.size<12){ fail&&fail('sec.badimg'); return; }
+  const hd=new FileReader();
+  hd.onload=()=>{ const b=new Uint8Array(hd.result), hex=[...b.slice(0,12)].map(x=>x.toString(16).padStart(2,'0')).join('');
+    const ok = hex.startsWith('89504e47') || hex.startsWith('ffd8ff') || hex.startsWith('47494638') || (hex.startsWith('52494646') && hex.slice(16,24)==='57454250');
+    if(!ok){ fail&&fail('sec.badimg'); return; }
+    const rd=new FileReader(); rd.onload=()=>{ const im=new Image();
+      im.onload=()=>{ const s=Math.min(1,maxPx/Math.max(im.naturalWidth,im.naturalHeight)), c=document.createElement('canvas'); c.width=Math.max(1,Math.round(im.naturalWidth*s)); c.height=Math.max(1,Math.round(im.naturalHeight*s));
+        // re-encoding through a canvas strips any hidden data and normalises the format
+        c.getContext('2d').drawImage(im,0,0,c.width,c.height); cb(c.toDataURL(f.type==='image/jpeg'?'image/jpeg':'image/png', .9), c.width, c.height); };
+      im.onerror=()=>fail&&fail('sec.badimg'); im.src=rd.result; };
+    rd.onerror=()=>fail&&fail('sec.badimg'); rd.readAsDataURL(f); };
+  hd.onerror=()=>fail&&fail('sec.badimg'); hd.readAsArrayBuffer(f.slice(0,12));
+}
+function safeTextFile(f, max, cb){
+  if(!f) return; if(f.size>max){ toast('sec.big'); return; }
+  const r=new FileReader(); r.onload=()=>cb(r.result); r.onerror=()=>toast('sec.badproj'); r.readAsText(f);
+}
+const safeJSON = s => { try{ const v=JSON.parse(s); return (v&&typeof v==='object')?v:null; }catch(e){ return null; } };
+// Text boxes: strip control characters and cap the length while typing.
+document.addEventListener('input', e=>{ const el=e.target; if(!el||!el.tagName) return;
+  if((el.tagName==='INPUT'&&el.type==='text')||el.tagName==='TEXTAREA'){ const max=el.tagName==='TEXTAREA'?LIMITS.area:LIMITS.text; let v=el.value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g,''); if(v.length>max) v=v.slice(0,max); if(v!==el.value) el.value=v; } }, true);
+// Clickjacking: if the page is shown inside another site's frame, hide it.
+try{ if(window.top!==window.self) document.documentElement.style.display='none'; }catch(e){ document.documentElement.style.display='none'; }
+
 /* ---------- appearance: theme, font size, language ---------- */
-let fontPct = +store.get('vs.font', 100);
+let fontPct = Math.min(160, Math.max(80, Math.round(+store.get('vs.font', 100)) || 100));
 function applyTheme(th){ document.documentElement.dataset.theme = th; store.set('vs.theme', th);
   document.querySelector('meta[name=theme-color]').content = th==='dark' ? '#0f3b40' : '#9a4b1c'; }
 function applyFont(){ document.documentElement.style.fontSize = (16*fontPct/100)+'px'; store.set('vs.font', fontPct); }
@@ -18,7 +105,7 @@ function renderChrome(){
   $('fdown').title = $('fup').title = t('ui.font');
   $('empty').innerHTML = esc(t('ui.empty'));
 }
-function refreshAll(){ renderChrome(); renderMenu(); renderPanel(); renderMapTools(); $('zoneinfo').textContent = t('ui.clickmap'); }
+function refreshAll(){ grahaSync(); renderChrome(); renderMenu(); renderPanel(); renderMapTools(); $('zoneinfo').textContent = t('ui.clickmap'); }
 
 /* ---------- menu ---------- */
 function renderMenu(){
@@ -41,11 +128,11 @@ function nextStep(){
   if(ui < sec.subs.length-1) go(sec.id, sec.subs[ui+1].id);
   else if(si < MENU.length-1) go(MENU[si+1].id, MENU[si+1].subs[0].id);
 }
-function go(sec, sub){ cur={sec,sub}; M.mode='view'; M.roomPts=[]; M.featPts=[]; M.draw(); renderMenu(); renderPanel(); renderMapTools(); }
+function go(sec, sub){ cur={sec,sub}; M.mode='view'; M.roomPts=[]; M.featPts=[]; M.annoDraft=null; M.annoSel=-1; M.cv.style.touchAction='auto'; ctxClose(); M.draw(); renderMenu(); renderPanel(); renderMapTools(); }
 
 function renderMapTools(){
   const c = (k,l)=>`<label><input type="checkbox" data-k="${k}" ${M.show[k]?'checked':''}> ${t(l)}</label>`;
-  $('maptools').innerHTML = c('zones','mt.zones')+c('labels','mt.labels')+c('grid','mt.grid')+c('brahma','mt.brahma')+c('poly','mt.boundary')+c('rooms','mt.rooms')+c('cuts','mt.cuts')+c('feats','mt.feats')+
+  $('maptools').innerHTML = c('zones','mt.zones')+c('labels','mt.labels')+c('grid','mt.grid')+c('brahma','mt.brahma')+c('poly','mt.boundary')+c('rooms','mt.rooms')+c('cuts','mt.cuts')+c('feats','mt.feats')+c('marma','mt.marma')+c('annos','mt.annos')+`<button class="btn alt" style="margin:0;padding:.15rem .5rem" onclick="saveMapImage()">${t('mt.saveimg')}</button>`+
     `<span class="tag">${M.pxPerM?M.pxPerM.toFixed(1)+' px/m':t('mt.noscale')}</span>`+
     `<span class="tag">${t('mt.north',{d:M.northDeg.toFixed(1)})}</span>`+
     (M.pxPerM&&M.polyArea()?`<span class="tag">${t('mt.area',{a:(M.polyArea()/M.pxPerM/M.pxPerM).toFixed(0)})}</span>`:'');
@@ -142,7 +229,7 @@ const PANELS = {
   'report/score': ()=>scorePanel(),
   'lib/rules': ()=>rulesPanel(),
   'map/layers': ()=>`<h2>${t('s.layers')}</h2><p>${t('p.layersinfo')}</p>
-    ${[['zones','mt.zones'],['labels','mt.labels'],['grid','mt.grid'],['brahma','mt.brahma'],['poly','mt.boundary'],['rooms','mt.rooms'],['cuts','mt.cuts'],['feats','mt.feats']].map(([k,l])=>`<label style="font-weight:400"><input type="checkbox" ${M.show[k]?'checked':''} onchange="M.show['${k}']=this.checked;M.draw();renderMapTools()"> ${t(l)}</label>`).join('')}`,
+    ${[['zones','mt.zones'],['labels','mt.labels'],['grid','mt.grid'],['brahma','mt.brahma'],['poly','mt.boundary'],['rooms','mt.rooms'],['cuts','mt.cuts'],['feats','mt.feats'],['marma','mt.marma'],['annos','mt.annos'],['graha','mt.graha']].map(([k,l])=>`<label style="font-weight:400"><input type="checkbox" ${M.show[k]?'checked':''} onchange="M.show['${k}']=this.checked;M.draw();renderMapTools()"> ${t(l)}</label>`).join('')}`,
   'zone/zsys': ()=>`<h2>${t('s.zsys')}</h2><p>${t('p.zsysinfo')}</p>
     <select onchange="M.zsys=+this.value;M.draw()">${[8,16,24,32].map(n=>`<option value="${n}" ${M.zsys===n?'selected':''}>${n}</option>`).join('')}</select>
     <div class="hint">${t('p.zsysnote')}</div>`,
@@ -162,6 +249,14 @@ const PANELS = {
     <button class="btn alt" onclick="devTemplate()">${t('p.z45tpl')}</button>
     <label>${t('p.z45load')}</label><input type="file" accept=".json" onchange="devLoad(this.files[0])">
     <button class="btn alt" onclick="M.devata=null;M.draw()">${t('p.z45clear')}</button>`,
+  'zone/marma': ()=>marmaPanel(),
+  'about/us': ()=>aboutPanel(),
+  'astro/birth': ()=>birthPanel(),
+  'astro/graha': ()=>grahaPanel(),
+  'astro/houses': ()=>housesPanel(),
+  'astro/audit': ()=>auditPanel(),
+  'map/alloc': ()=>allocPanel(),
+  'map/draw': ()=>drawPanel(),
   'zone/brahma': ()=>`<h2>${t('s.brahma')}</h2><p>${t('p.brinfo')}</p>
     <label><input type="checkbox" ${M.show.brahma?'checked':''} onchange="M.show.brahma=this.checked;M.draw();renderMapTools()"> ${t('p.brshow')}</label>
     <div class="hint">${t('p.brhint')}</div>`,
@@ -290,13 +385,9 @@ function rulesTemplate(){
   a.download = 'vastusense-rules-template.json'; a.click();
 }
 function rulesLoad(f){
-  if(!f) return; const r = new FileReader();
-  r.onload = () => { let d; try{ d = JSON.parse(r.result); }catch(e){ d=null; }
-    const list = Array.isArray(d) ? d : d && d.rules, okDir = a => !a || (Array.isArray(a) && a.every(x=>DIR8.includes(x)||x==='C'));
-    if(!Array.isArray(list) || !list.length || !list.every(x=>ROOM_ALL.includes(x.room) && okDir(x.prefer) && okDir(x.accept) && okDir(x.avoid) && (x.weight===undefined || (x.weight>=1 && x.weight<=5)))){ toast('p.rulesbad'); return; }
-    P.userRules = (P.userRules||[]).concat(list.map(x=>({room:x.room, prefer:x.prefer||[], accept:x.accept||[], avoid:x.avoid||[], weight:x.weight||1, source:String(x.source||''), status:x.status==='verified'?'verified':'unverified', applies:x.applies||'*', school:x.school||[]})));
-    renderPanel(); toast('p.rulesok'); };
-  r.readAsText(f);
+  safeTextFile(f, LIMITS.small, txt=>{ const d=safeJSON(txt), raw=Array.isArray(d)?d:(d&&d.rules), list=sRules(raw,'rule');
+    if(!Array.isArray(raw)||!raw.length||list.length!==raw.length){ toast('p.rulesbad'); return; }
+    P.userRules=(P.userRules||[]).concat(list).slice(0,500); renderPanel(); toast('p.rulesok'); });
 }
 /* ---------- stage 4 helpers ---------- */
 let featSel = {};
@@ -381,16 +472,9 @@ function waterCalc(){
 /* ---------- stage 8: HVAC ---------- */
 /* ---------- stage 10: report, branding, certificate ---------- */
 const RP_SECTIONS = ['map','score','site','mep','hvac','conflicts','remedies','rules'];
-function loadBrand(){ try{ const b = JSON.parse(store.get('vs.brand','null')); if(b) P.brand = b; }catch(e){} }
-function brandSet(k,v){ P.brand = P.brand||{}; P.brand[k] = v; store.set('vs.brand', JSON.stringify(P.brand)); }
-function brandLogo(f){
-  if(!f) return; const r = new FileReader();
-  r.onload = () => { const im = new Image(); im.onload = () => {
-    const w = Math.min(300, im.naturalWidth), h = Math.round(im.naturalHeight*w/im.naturalWidth), c = document.createElement('canvas'); c.width=w; c.height=h;
-    c.getContext('2d').drawImage(im,0,0,w,h); brandSet('logo', c.toDataURL('image/png')); renderPanel(); };
-    im.src = r.result; };
-  r.readAsDataURL(f);
-}
+function loadBrand(){ const b = safeJSON(store.get('vs.brand','null')); if(b) P.brand = sBrand(b); }
+function brandSet(k,v){ P.brand = P.brand||{}; P.brand[k] = k==='logo' ? sDataImg(v,600000) : sStr(v,300); store.set('vs.brand', JSON.stringify(P.brand)); }
+function brandLogo(f){ safeImageFile(f, 300, url=>{ brandSet('logo',url); renderPanel(); }, k=>toast(k)); }
 function brandPanel(){
   const b = P.brand||{}, inp = (k,l)=>`<label>${t(l)}</label><input type="text" value="${esc(b[k])}" onchange="brandSet('${k}',this.value)">`;
   return `<h2>${t('s.brand')}</h2><p>${t('p.brandinfo')}</p>${inp('name','b.company')}${inp('prep','b.prep')}${inp('contact','b.contact')}${inp('footer','b.footer')}
@@ -460,7 +544,7 @@ function rpRules(items){
   return rpTbl([t('p.roomtype'),'',t('p.weight'),t('p.source')], usedRules(items).map(r=>[typeLabel(r.room), `<span class="vb v-prefer">${(r.prefer||[]).join(' ')||'-'}</span> <span class="vb v-ok">${(r.accept||[]).join(' ')||'-'}</span> <span class="vb v-avoid">${(r.avoid||[]).join(' ')||'-'}</span>`, r.weight||1, (esc(r.source)||t('p.srcnone'))+' — '+stLabel(r.status)]));
 }
 function showReport(html){
-  $('reportview').innerHTML = `<div class="rp-bar"><button class="btn" onclick="window.print()">${t('rp.print')}</button><button class="btn alt" onclick="closeReport()">${t('rp.close')}</button></div><div class="rp">${html}</div>`;
+  $('reportview').innerHTML = `<div class="rp-bar"><button class="btn" onclick="window.print()">${t('rp.print')}</button><button class="btn alt" onclick="closeReport()">${t('rp.close')}</button></div><div class="rp">${html}</div><div class="rp-wm" aria-hidden="true">${'<span>VASTUSENSE BY ANOOPAM</span>'.repeat(40)}</div>`;
   document.body.classList.add('rp-on'); $('reportview').scrollTop = 0;
 }
 function closeReport(){ document.body.classList.remove('rp-on'); $('reportview').innerHTML=''; }
@@ -559,13 +643,9 @@ function remTemplate(){
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify(ex,null,2)],{type:'application/json'})); a.download='vastusense-remedies-template.json'; a.click();
 }
 function remLoad(f){
-  if(!f) return; const r=new FileReader();
-  r.onload=()=>{ let d; try{ d=JSON.parse(r.result); }catch(e){ d=null; }
-    const list=Array.isArray(d)?d:d&&d.remedies, okDir=a=>!a||(Array.isArray(a)&&a.every(x=>DIR8.includes(x)||x==='C')), okV=a=>!a||(Array.isArray(a)&&a.every(x=>['prefer','ok','avoid','neutral'].includes(x)));
-    if(!Array.isArray(list)||!list.length||!list.every(x=>ROOM_ALL.includes(x.room)&&okDir(x.dirs)&&okV(x.verdict)&&typeof x.text==='string'&&x.text.trim())){ toast('rm.bad'); return; }
-    P.userRemedies=(P.userRemedies||[]).concat(list.map(x=>({room:x.room, dirs:x.dirs||[], verdict:x.verdict||[], category:['layout','element','colour'].includes(x.category)?x.category:'other', text:x.text, structural:x.structural===true, source:String(x.source||''), status:x.status==='verified'?'verified':'unverified'})));
-    renderPanel(); toast('rm.ok'); };
-  r.readAsText(f);
+  safeTextFile(f, LIMITS.small, txt=>{ const d=safeJSON(txt), raw=Array.isArray(d)?d:(d&&d.remedies), list=sRules(raw,'remedy');
+    if(!Array.isArray(raw)||!raw.length||list.length!==raw.length){ toast('rm.bad'); return; }
+    P.userRemedies=(P.userRemedies||[]).concat(list).slice(0,500); renderPanel(); toast('rm.ok'); });
 }
 function coolPanel(){
   const h = `<h2>${t('s.load')}</h2><p>${t('p.loadinfo')}</p>`;
@@ -688,6 +768,12 @@ function libOpenSrc(i){ libView = {i, tab:0}; renderPanel(); window.scrollTo(0,0
 function libTabSel(k){ libView.tab = k; renderPanel(); }
 function libBack(){ libView = {i:null, tab:0}; renderPanel(); }
 const STAT = {ok:['Confirmed','v-prefer'], part:['Partly','v-ok'], diff:['Differs','v-avoid'], none:['Not on page','v-neutral'], unc:['Not checked','v-neutral']};
+// Watermark inside every library diagram (SVG): a faint tiled name and a small tag in the corner.
+const WM_TEXT = 'VASTUSENSE BY ANOOPAM';
+function wmSvg(s){
+  const m=s.match(/viewBox="0 0 (\d+(?:\.\d+)?) (\d+(?:\.\d+)?)"/); if(!m) return s; const W=+m[1], H=+m[2];
+  return s.replace('</svg>', `<text x="${W/2}" y="${H/2}" font-size="${Math.max(10,Math.round(W/15))}" font-weight="700" fill="#000" fill-opacity=".07" text-anchor="middle" transform="rotate(-25 ${W/2} ${H/2})" font-family="sans-serif">${WM_TEXT}</text><text x="${W-5}" y="${H-4}" font-size="7" text-anchor="end" fill="#000" fill-opacity=".5" font-family="sans-serif">${WM_TEXT}</text></svg>`);
+}
 const libCheck = c => (c.title?`<br><b>${esc(c.title)}</b>`:'') + `<table class="ztab" style="margin:.4rem 0"><tr><td><b>Your pasted statement</b></td><td><b>Status</b></td><td><b>What the page says</b></td></tr>${c.rows.map(r=>`<tr><td>${esc(r[0])}</td><td><span class="vb ${STAT[r[1]][1]}">${STAT[r[1]][0]}</span></td><td>${esc(r[2])}</td></tr>`).join('')}</table>`;
 function secBlocks(bl){
   return bl.map(b=>
@@ -697,7 +783,7 @@ function secBlocks(bl){
     b.table ? libTable(b.table) :
     b.check ? libCheck(b.check) :
     b.notes ? `<ul style="margin:.2rem 0 .4rem 1.1rem;padding:0">${b.notes.map(s=>`<li>${esc(s)}</li>`).join('')}</ul>` :
-    b.svg ? `<div>${DIAG[b.svg]()}</div><p class="rp-sm" style="font-size:.8rem">${esc(b.cap||'')}</p>` :
+    b.svg ? `<div>${wmSvg(DIAG[b.svg]())}</div><p class="rp-sm" style="font-size:.8rem">${esc(b.cap||'')}</p>` :
     b.tool==='dims' ? dimsTool() : '').join('');
 }
 function classicPanel(){
@@ -780,7 +866,8 @@ function bsDimUpdate(){
     <text x="${x0+w/2}" y="${y0+h+16}" text-anchor="middle">length ${L.toFixed(2)} cubits</text><text x="${x0+w+8}" y="${y0+h/2}" font-size="9">breadth ${B}</text>
     <text x="${x0+w/2}" y="${y0+h/2}" text-anchor="middle" fill="#555">wall thickness ${wall.toFixed(2)} (drawn to scale)</text>
     <text x="${x0+w/2}" y="${y0+h/2+14}" text-anchor="middle" fill="#555">floor height ${floor.toFixed(2)} cubits</text></svg>
-    <div class="rp-sm" style="font-size:.8rem">Length = breadth + 1/${f} (verses 4-13); wall = breadth / 16 (23); floor height = breadth / 16 + 4 (22). All in cubits, as the page gives them.</div>`;
+    <div class="rp-sm" style="font-size:.8rem">Length = breadth + 1/${f} (verses 4-13); wall = breadth / 16 (23); floor height = breadth / 16 + 4 (22). All in cubits, as the source gives them.</div>`;
+  $('bsDimOut').innerHTML = wmSvg($('bsDimOut').innerHTML);
 }
 function devTemplate(){
   const a = document.createElement('a');
@@ -788,12 +875,9 @@ function devTemplate(){
   a.download = 'devata-template.json'; a.click();
 }
 function devLoad(f){
-  if(!f) return; const r = new FileReader();
-  r.onload = () => { let d; try{ d = JSON.parse(r.result); }catch(e){ d=null; }
-    const c = Array.isArray(d)?d:(d&&d.cells);
+  safeTextFile(f, LIMITS.small, txt=>{ const d=safeJSON(txt), c=Array.isArray(d)?d:(d&&d.cells);
     if(!Array.isArray(c)||c.length!==81){ $('zoneinfo').textContent=t('p.z45bad'); return; }
-    M.devata = c.map(String); M.show.grid = true; M.draw(); renderMapTools(); toast('p.z45ok'); };
-  r.readAsText(f);
+    M.devata = c.map(v=>sStr(v,60)); M.show.grid = true; M.draw(); renderMapTools(); toast('p.z45ok'); });
 }
 function renderPanel(){
   const key = cur.sec+'/'+cur.sub;
@@ -801,26 +885,224 @@ function renderPanel(){
   $('panel').innerHTML = PANELS[key] ? PANELS[key]()
     : `<h2>${t('s.'+sub.id)}</h2><div class="soonbox">${t('ui.soon',{n:sub.stage})}</div>`;
   $('panel').innerHTML += `<div style="margin-top:1rem"><button class="btn alt" onclick="nextStep()">${t('ui.next')} &rsaquo;</button></div>`;
-  document.querySelector('.layout').classList.toggle('wide', key==='lib/classic' && libView.i!==null);
+  document.querySelector('.layout').classList.toggle('wide', (key==='lib/classic' && libView.i!==null) || key==='astro/audit');
 }
 
 /* ---------- files ---------- */
 function loadFile(f){
-  if(!f) return; const r = new FileReader();
-  r.onload = () => { P.imgData = r.result; M.setImage(r.result, ()=>{M.poly=[];M.closed=false;M.centre=null;renderMapTools();}); };
-  r.readAsDataURL(f);
+  safeImageFile(f, 3000, url=>{ P.imgData = url; M.setImage(url, ()=>{M.poly=[];M.closed=false;M.centre=null;renderMapTools();}); }, k=>toast(k));
 }
 function saveProject(){
-  const d = {P, map:{northDeg:M.northDeg, poly:M.poly, closed:M.closed, pxPerM:M.pxPerM, centre:M.centre, devata:M.devata, rooms:M.rooms, zsys:M.zsys, feats:M.feats}};
+  const d = {P, map:{northDeg:M.northDeg, poly:M.poly, closed:M.closed, pxPerM:M.pxPerM, centre:M.centre, devata:M.devata, rooms:M.rooms, zsys:M.zsys, feats:M.feats, annos:M.annos}};
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(d)],{type:'application/json'}));
-  a.download = (P.name||'vastusense-project')+'.json'; a.click();
+  a.download = (sStr(P.name,60).replace(/[^\w\- ]+/g,'')||'vastusense-project')+'.json'; a.click();
 }
 function openProject(f){
-  if(!f) return; const r = new FileReader();
-  r.onload = () => { const d = JSON.parse(r.result); Object.assign(P,d.P); Object.assign(M,d.map); M.windFrom = (P.windFrom===undefined||P.windFrom==='') ? null : +P.windFrom;
-    if(P.imgData) M.setImage(P.imgData, renderMapTools); else M.draw(); renderPanel(); renderMapTools(); toast('p.loaded'); };
-  r.readAsText(f);
+  safeTextFile(f, LIMITS.project, txt=>{
+    const d = sanitizeProject(safeJSON(txt)); if(!d){ toast('sec.badproj'); return; }
+    Object.keys(P).forEach(k=>delete P[k]); Object.assign(P,d.P); Object.assign(M,d.map);
+    M.annoUndo=[]; M.annoRedo=[]; M.annoSel=-1; M.windFrom = P.windFrom==='' ? null : +P.windFrom;
+    if(P.imgData) M.setImage(P.imgData, renderMapTools); else M.draw(); refreshAll(); toast('p.loaded'); });
+}
+
+/* ---------- right-click space menu, allocation dropdown, drawing panel ---------- */
+const CTX_GROUPS = [['cx.rooms',ROOM_TYPES,'room'],
+  ['cx.mep',['mpanel','xfmr','dg','earth','meter','ohtank','sump','stp','manhole','pump','fexit','hydrant','fpump','assembly','lift','shaft','stairc'],'feat'],
+  ['cx.hvac',['ahu','chiller','ctower','odu','plantroom','fai','exh','kexh','duct','pipe'],'feat'],
+  ['cx.site',['door','borewell','well','road','tjunction','deadend','water','tallbld','pole','temple','tree','plant','other'],'feat']];
+let ctxPt = null;
+function ctxClose(){ const m=$('ctxmenu'); if(m){ m.style.display='none'; m.innerHTML=''; } }
+function ctxOpen(e){
+  ctxPt = M.pos(e); const r=M.cv.getBoundingClientRect(), tol=14*M.cv.width/r.width; let h='';
+  const room=M.roomAt(ctxPt), ri=room?M.rooms.indexOf(room):-1;
+  const fi=M.feats.findIndex(f=>{ const q=M.featPoint(f); return Math.hypot(q[0]-ctxPt[0],q[1]-ctxPt[1])<=tol; });
+  const ai=M.annoHit(ctxPt,true);
+  if(ri>=0) h+=`<details><summary>${t('cx.changeroom')}</summary>${ROOM_TYPES.map(k=>`<button onclick="ctxRoomType(${ri},'${k}')">${t('r.'+k)}</button>`).join('')}</details><button class="dng" onclick="ctxDel('room',${ri})">${t('cx.delroom')}</button>`;
+  if(fi>=0) h+=`<button class="dng" onclick="ctxDel('feat',${fi})">${t('cx.delitem')}: ${t('f.'+M.feats[fi].kind)}</button>`;
+  if(ai>=0) h+=`<button class="dng" onclick="ctxDel('anno',${ai})">${t('cx.deldraw')}</button>`;
+  if(h) h+='<hr>';
+  h+=`<div style="padding:.2rem .5rem;font-size:.75rem;color:var(--mut)">${t('cx.place')}</div>`;
+  CTX_GROUPS.forEach(g=>{ h+=`<details><summary>${t(g[0])}</summary>${g[1].map(k=>`<button onclick="ctxPlace('${g[2]}','${k}')">${g[2]==='room'?t('r.'+k):t('f.'+k)}</button>`).join('')}</details>`; });
+  h+=`<hr><button onclick="ctxText()">${t('cx.text')}</button>`;
+  const m=$('ctxmenu'); m.innerHTML=h; m.style.display='block';
+  m.style.left=Math.max(4,Math.min(e.clientX, innerWidth-m.offsetWidth-4))+'px'; m.style.top=Math.max(4,Math.min(e.clientY, innerHeight-m.offsetHeight-4))+'px';
+}
+function ctxRoomType(i,k){ if(!ROOM_TYPES.includes(k)||!M.rooms[i]) return; M.rooms[i].type=k; ctxClose(); M.draw(); M.changed(); }
+function ctxDel(kind,i){ if(kind==='room') M.rooms.splice(i,1); else if(kind==='feat') M.feats.splice(i,1); else if(kind==='anno'){ M.annoPush(); M.annos.splice(i,1); M.annoSel=-1; } ctxClose(); M.draw(); M.changed(); }
+function ctxPlace(kind,k){
+  ctxClose(); const p=ctxPt; M.mode='view'; M.roomPts=[]; M.featPts=[];
+  if(kind==='room'){ if(!ROOM_TYPES.includes(k)) return; M.curType=k; M.roomPts=[p]; M.mode='room'; }
+  else { if(!FEAT_OK().includes(k)) return; if(LINE_KINDS.includes(k)){ M.featKind=k; M.featPts=[p]; M.mode='feat'; } else M.feats.push({kind:k, pts:[p]}); }
+  M.draw(); M.changed();
+}
+function ctxText(){ const p=ctxPt; ctxClose(); const s=prompt(t('p.texthere')); if(s&&sStr(s,500)){ M.annoPush(); M.annos.push({type:'text', pts:[p], text:sStr(s,500), stroke:M.annoStyle.stroke, size:M.annoStyle.size}); M.draw(); M.changed(); } }
+document.addEventListener('click', e=>{ if(!(e.target.closest&&e.target.closest('#ctxmenu'))) ctxClose(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') ctxClose(); });
+window.addEventListener('scroll', ctxClose, {passive:true});
+
+function allocPanel(){
+  return `<h2>${t('s.alloc')}</h2><p>${t('p.allocinfo')}</p><select id="allocsel">${CTX_GROUPS.map(g=>`<optgroup label="${t(g[0])}">${g[1].map(k=>`<option value="${g[2]}:${k}">${g[2]==='room'?t('r.'+k):t('f.'+k)}</option>`).join('')}</optgroup>`).join('')}</select>
+    <button class="btn" onclick="allocGo()">${t('p.place')}</button>`;
+}
+function allocGo(){
+  const [kind,k]=$('allocsel').value.split(':'); M.mode='view'; M.roomPts=[]; M.featPts=[];
+  if(kind==='room'&&ROOM_TYPES.includes(k)){ M.curType=k; M.mode='room'; } else if(FEAT_OK().includes(k)){ M.featKind=k; M.mode='feat'; }
+  M.draw();
+}
+const ANNO_TOOLS = [['select','tl.select'],['pencil','tl.pencil'],['line','tl.line'],['rect','tl.rect'],['square','tl.square'],['circle','tl.circle'],['ellipse','tl.ellipse'],['tri','tl.tri'],['trap','tl.trap'],['text','tl.text'],['erase','tl.erase']];
+function drawPanel(){
+  M.mode='anno'; M.cv.style.touchAction='none'; const st=M.annoStyle, opt=(list,cur)=>list.map(([v,l])=>`<option value="${v}" ${cur===v?'selected':''}>${t(l)}</option>`).join('');
+  return `<h2>${t('s.draw')}</h2><p>${t('p.drawinfo')}</p><div class="tools">${ANNO_TOOLS.map(([k,l])=>`<button class="btn ${M.annoTool===k?'':'alt'}" onclick="annoTool('${k}')">${t(l)}</button>`).join('')}</div>
+    <label>${t('p.stroke')}</label><input type="color" value="${st.stroke}" onchange="annoSet('stroke',this.value)">
+    <label>${t('p.fillmode')}</label><select onchange="annoSet('fillMode',this.value)">${opt([['none','fill.none'],['light','fill.light'],['solid','fill.solid']],st.fillMode)}</select>
+    <label>${t('p.fillc')}</label><input type="color" value="${st.fill}" onchange="annoSet('fill',this.value)">
+    <label>${t('p.thick')}: <b id="thv">${st.w}</b></label><input type="range" min="1" max="20" value="${st.w}" oninput="$('thv').textContent=this.value;annoSet('w',+this.value)">
+    <label>${t('p.dash')}</label><select onchange="annoSet('dash',this.value)">${opt([['solid','dash.solid'],['dash','dash.dash'],['dot','dash.dot'],['dd','dash.dd']],st.dash)}</select>
+    <label>${t('p.textsize')}</label><input type="number" min="6" max="80" value="${st.size}" onchange="annoSet('size',+this.value)">
+    <div style="margin-top:.6rem"><button class="btn alt" onclick="M.annoUndoDo()">${t('p.undo')}</button><button class="btn alt" onclick="M.annoRedoDo()">${t('p.redo')}</button><button class="btn alt" onclick="if(confirm(t('p.confirmclear')))M.annoClear()">${t('p.clearall')}</button></div>`;
+}
+function annoTool(k){ if(!ANNO_TOOLS.some(x=>x[0]===k)) return; M.annoTool=k; M.annoSel=-1; renderPanel(); M.draw(); }
+function annoSet(k,v){
+  const st=M.annoStyle;
+  if(k==='stroke'||k==='fill') v=sColor(v,st[k]); else if(k==='w') v=sNum(v,1,20,3); else if(k==='size') v=sNum(v,6,80,14);
+  else if(k==='fillMode') v=sEnum(v,['none','light','solid'],'none'); else if(k==='dash') v=sEnum(v,['solid','dash','dot','dd'],'solid'); else return;
+  st[k]=v; const a=M.annos[M.annoSel]; if(a){ M.annoPush(); a[k]=v; } M.draw();
+}
+function saveMapImage(){ M.draw(); M.cv.toBlob(b=>{ if(!b) return; const a=document.createElement('a'); a.href=URL.createObjectURL(b); a.download='vastusense-map.png'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),3000); },'image/png'); }
+
+/* ---------- AstroVastu ---------- */
+function grahaSync(){ M.grahaLabels = {}; for(const d in GRAHA_DIR) M.grahaLabels[d] = t('gr.'+GRAHA_DIR[d]); }
+function astroSet(k,v){
+  P.astro = P.astro||{}; v = String(v||'');
+  P.astro[k] = k==='date' ? (/^\d{4}-\d{2}-\d{2}$/.test(v)?v:'') : k==='time' ? (/^\d{2}:\d{2}$/.test(v)?v:'') : k==='asc' ? sEnum(v,RASHI,'') : sStr(v, k==='place'?160:k==='dasha'?80:120);
+}
+const AS_STATES = ['strong','weak','afflicted'];
+function astroHouse(h){ P.astro=P.astro||{}; P.astro.houses=P.astro.houses||{}; return P.astro.houses[h] || (P.astro.houses[h]={state:'',planets:''}); }
+function astroHouseSet(h,k,v){ if(!(h>=1&&h<=12)) return; const o=astroHouse(h); o[k] = k==='state' ? sEnum(v,AS_STATES,'') : sStr(v,80); }
+function housesPanel(){
+  const a=P.astro||{};
+  return `<h2>${t('s.houses')}</h2><p>${t('p.housesinfo')}</p>
+    <label>${t('p.asc')}</label><select onchange="astroSet('asc',this.value)"><option value="">${t('p.choose')}</option>${RASHI.map(r=>`<option ${a.asc===r?'selected':''}>${r}</option>`).join('')}</select>
+    <label>${t('p.dasha')}</label><input type="text" value="${esc(a.dasha)}" onchange="astroSet('dasha',this.value)">
+    <table class="ztab" style="margin-top:.6rem">${ASTRO_HOUSES.map(x=>{ const o=(a.houses||{})[x.h]||{}, m=ASTRO_META[x.h];
+      return `<tr><td><b>H${x.h}</b> ${m[0]}<br><small>${x.z} &middot; ${m[1].map(p=>t('gr.'+p)).join(', ')}</small></td>
+        <td><select onchange="astroHouseSet(${x.h},'state',this.value)"><option value="">${t('p.choose')}</option>${AS_STATES.map(s=>`<option value="${s}" ${o.state===s?'selected':''}>${t('as.'+s)}</option>`).join('')}</select>
+        <input type="text" placeholder="${t('p.planets')}" value="${esc(o.planets)}" onchange="astroHouseSet(${x.h},'planets',this.value)"></td></tr>`; }).join('')}</table>
+    <div class="hint"><small>${t('p.astronote')}</small></div>`;
+}
+const zone16 = p => ZONES[Math.floor(((M.bearing(p)+11.25)%360)/22.5)].c;
+function astroItems(){
+  const out=[]; M.rooms.forEach(r=>out.push({type:r.type, zone:zone16(M.centroid(r.pts))}));
+  M.feats.filter(f=>ROOM_ALL.includes(f.kind)).forEach(f=>out.push({type:f.kind, zone:zone16(M.featPoint(f))})); return out;
+}
+// Rules A, B, C from the owner's framework. A strong house with a supportive item: activate. Strong with a clashing item: remove it.
+// Weak or afflicted with a clashing item: pacify and balance.
+function astroAudit(){
+  const items = M.closed ? astroItems() : [], hs=(P.astro||{}).houses||{};
+  return ASTRO_HOUSES.map(x=>{ const st=hs[x.h]||{}, state=st.state||'', inZ=items.filter(i=>i.zone===x.z), sup=inZ.filter(i=>x.support.includes(i.type)), cl=inZ.filter(i=>x.clash.includes(i.type));
+    let v=''; if(state==='strong') v = cl.length?'B':(sup.length?'A':'Aopen'); else if(state==='weak'||state==='afflicted') v = cl.length?'C':'Cclear';
+    return {x,state,planets:st.planets||'',inZ,sup,cl,v}; });
+}
+const AV_CLS = {A:'v-prefer',Aopen:'v-ok',B:'v-avoid',C:'v-ok',Cclear:'v-neutral','':'v-neutral'};
+const AV_COL = {strong:'#b7e1b0',weak:'#ffe08a',afflicted:'#f1a9a0','':'#eee'};
+// North Indian chart (left half of the side-by-side view): 12 regions, house 1 at the top, counter-clockwise.
+function astroKundaliSvg(rows){
+  const O=[150,150], pts={1:[O,[75,75],[150,0],[225,75]],2:[[0,0],[150,0],[75,75]],3:[[0,0],[75,75],[0,150]],4:[O,[75,75],[0,150],[75,225]],5:[[0,150],[75,225],[0,300]],6:[[0,300],[75,225],[150,300]],
+    7:[O,[75,225],[150,300],[225,225]],8:[[150,300],[225,225],[300,300]],9:[[300,300],[225,225],[300,150]],10:[O,[225,225],[300,150],[225,75]],11:[[300,150],[225,75],[300,0]],12:[[300,0],[225,75],[150,0]]};
+  const cen=p=>[p.reduce((s,q)=>s+q[0],0)/p.length, p.reduce((s,q)=>s+q[1],0)/p.length];
+  const body=Object.keys(pts).map(h=>{ const r=rows[h-1], p=pts[h], c=cen(p), sub=(ASTRO_META[h][0]+(r.planets?': '+r.planets:'')).slice(0,24);
+    return `<polygon points="${p.map(q=>q.join(',')).join(' ')}" fill="${AV_COL[r.state]}" stroke="#555"/><text x="${c[0]}" y="${c[1]}" font-size="14" font-weight="700" text-anchor="middle">H${h}</text><text x="${c[0]}" y="${c[1]+12}" font-size="8" text-anchor="middle" fill="#333">${esc(r.x.z)}</text><text x="${c[0]}" y="${c[1]+22}" font-size="7" text-anchor="middle" fill="#555">${esc(sub)}</text>`; }).join('');
+  return `<svg viewBox="0 0 300 300" style="width:100%;max-width:26rem;background:#fff;border:1px solid #ccc" font-family="sans-serif" role="img">${body}</svg>`;
+}
+// Vastu map (right half): the real plan turned so EAST is at the top, North on the left, with the 12 house zones tinted.
+function astroMapImg(rows){
+  if(!M.closed) return '';
+  const S=420, c=M.getCentre(), W=M.cv.width, H=M.cv.height;
+  const keep=Object.assign({},M.show); Object.assign(M.show,{zones:false,labels:false,graha:false,marma:false,grid:false,brahma:false}); M.draw();
+  const cv=document.createElement('canvas'); cv.width=cv.height=S; const x=cv.getContext('2d'); x.fillStyle='#faf6ee'; x.fillRect(0,0,S,S);
+  const far=Math.max(Math.hypot(c[0],c[1]),Math.hypot(W-c[0],c[1]),Math.hypot(c[0],H-c[1]),Math.hypot(W-c[0],H-c[1])), k=(S/2)/far*0.98;
+  x.save(); x.translate(S/2,S/2); x.rotate(-(M.northDeg+90)*Math.PI/180); x.drawImage(M.cv,-c[0]*k,-c[1]*k,W*k,H*k); x.restore();
+  Object.assign(M.show,keep); M.draw();
+  const byZone={}; rows.forEach(r=>{ byZone[r.x.z]=r; }), tint={A:'#2e9a3a',Aopen:'#8fcf4a',B:'#d6392b',C:'#e0a800',Cclear:'#c9b94a','':null};
+  ZONES.forEach((z,i)=>{ const b=i*22.5, a0=(b-11.25-180)*Math.PI/180, a1=(b+11.25-180)*Math.PI/180, am=(b-180)*Math.PI/180, r=byZone[z.c];
+    if(r){ const col=tint[r.v]||(r.state?AV_COL[r.state]:null); if(col){ x.save(); x.globalAlpha=.30; x.fillStyle=col; x.beginPath(); x.moveTo(S/2,S/2); x.arc(S/2,S/2,S/2,a0,a1); x.closePath(); x.fill(); x.restore(); } }
+    x.strokeStyle='#0006'; x.lineWidth=1; x.beginPath(); x.moveTo(S/2,S/2); x.lineTo(S/2+Math.cos(a0)*S/2,S/2+Math.sin(a0)*S/2); x.stroke();
+    x.font='bold 13px sans-serif'; x.textAlign='center'; x.fillStyle=r?'#000':'#777'; x.lineWidth=3; x.strokeStyle='#fffc'; const tx=S/2+Math.cos(am)*S*0.42, ty=S/2+Math.sin(am)*S*0.42, lab=r?'H'+r.x.h+' '+z.c:z.c; x.strokeText(lab,tx,ty); x.fillText(lab,tx,ty); });
+  x.font='bold 15px sans-serif'; x.fillStyle='#222'; x.textAlign='center'; x.fillText('E',S/2,16); x.fillText('W',S/2,S-6); x.fillText('N',10,S/2+5); x.fillText('S',S-10,S/2+5);
+  x.save(); x.font='bold 11px sans-serif'; x.textAlign='right'; x.fillStyle='#222'; x.globalAlpha=.7; x.fillText('VASTUSENSE BY ANOOPAM',S-6,S-22); x.restore();
+  return `<img src="${cv.toDataURL('image/png')}" style="width:100%;max-width:26rem;border:1px solid #ccc" alt="">`;
+}function auditPanel(){
+  const rows=astroAudit(), mapped=ASTRO_HOUSES.map(x=>x.z), items=M.closed?astroItems():[], un=items.filter(i=>!mapped.includes(i.zone));
+  let h=`<h2>${t('s.audit')}</h2><p>${t('p.auditinfo')}</p>`;
+  if(!M.closed) h+=`<div class="hint">${t('p.auditneed')}</div>`;
+  h+=`<div style="display:flex;flex-wrap:wrap;gap:.8rem;align-items:flex-start"><div style="flex:1;min-width:15rem">${wmSvg(astroKundaliSvg(rows))}<div class="rp-sm" style="font-size:.8rem">${t('p.chartleft')}</div></div>
+    <div style="flex:1;min-width:15rem">${astroMapImg(rows) || `<div class="hint">${t('p.auditneed')}</div>`}<div class="rp-sm" style="font-size:.8rem">${t('p.chartright')}</div></div></div>`;
+  h+=`<table class="ztab" style="margin-top:.6rem"><tr><td><b>H</b></td><td><b>${t('p.dir')}</b></td><td><b>${t('p.state')}</b></td><td><b>${t('p.inzone')}</b></td><td><b>${t('p.verdict')}</b></td></tr>${rows.map(r=>`<tr><td>H${r.x.h}</td><td>${r.x.z}</td><td>${r.state?t('as.'+r.state):'-'}</td><td>${r.inZ.map(i=>typeLabel(i.type)).join(', ')||'-'}</td><td>${r.v?`<span class="vb ${AV_CLS[r.v]}">${t('ar.'+r.v)}</span>`:'-'}</td></tr>`).join('')}</table>`;
+  const acts=rows.filter(r=>r.v);
+  h+=acts.length ? acts.map(r=>{ const weak=(r.v==='C'||r.v==='Cclear'), txt=weak?r.x.weak:r.x.strong;
+    return `<div class="hint"><b>H${r.x.h} &middot; ${r.x.z}</b> <span class="vb ${AV_CLS[r.v]}">${t('ar.'+r.v)}</span>${r.cl.length?`<br>${t('p.moveout',{z:r.x.z})} <b>${r.cl.map(i=>typeLabel(i.type)).join(', ')}</b>`:''}<br><small>${esc(txt)}</small></div>`; }).join('')
+    : `<div class="hint">${t('p.auditnone')}</div>`;
+  if(un.length) h+=`<div class="hint"><b>${t('p.unmapped')}</b><br>${un.map(i=>typeLabel(i.type)+' ('+i.zone+')').join(', ')}</div>`;
+  return h+`<div class="hint"><small>${t('p.astronote')}</small></div>`;
+}
+
+function birthPanel(){
+  const a=P.astro||{};
+  return `<h2>${t('s.birth')}</h2><p>${t('p.birthinfo')}</p>
+    <label>${t('p.bname')}</label><input type="text" value="${esc(a.name)}" onchange="astroSet('name',this.value)">
+    <label>${t('p.bdate')}</label><input type="date" value="${esc(a.date)}" onchange="astroSet('date',this.value)">
+    <label>${t('p.btime')}</label><input type="time" value="${esc(a.time)}" onchange="astroSet('time',this.value)">
+    <label>${t('p.bplace')}</label><input type="text" value="${esc(a.place)}" onchange="astroSet('place',this.value)">
+    <div class="hint"><small>${t('p.astroprivacy')}</small></div>`;
+}
+function grahaPanel(){
+  return `<h2>${t('s.graha')}</h2><p>${t('p.grahainfo')}</p>
+    <label style="font-weight:400"><input type="checkbox" ${M.show.graha?'checked':''} onchange="M.show.graha=this.checked;if(this.checked)M.show.zones=true;grahaSync();M.draw();renderMapTools()"> ${t('p.grahashow')}</label>
+    <table class="ztab">${['N','NE','E','SE','S','SW','W','NW'].map(d=>`<tr><td><b>${d}</b></td><td>${zoneName(d)}</td><td>${t('gr.'+GRAHA_DIR[d])}</td></tr>`).join('')}</table>
+    <div class="hint"><span class="tag">${t('st.unv')}</span> <small>${t('p.grahanote')}</small></div>`;
+}
+
+/* ---------- About us ---------- */
+let aboutEdit = null;   // id of the person being edited
+// Built-in profile text and photo are the defaults; a visitor's own edits (kept in their browser) only replace them when not empty.
+function loadAbout(){ const s=safeJSON(store.get('vs.about','null')); if(s&&Array.isArray(s.people)) s.people.forEach(sp=>{ const p=ABOUT.people.find(x=>sp&&x.id===sp.id); if(!p) return;
+  [['role',sStr(sp.role,200)],['tagline',sStr(sp.tagline,300)],['bio',sStr(sp.bio,LIMITS.area)],['photo',sDataImg(sp.photo,600000)]].forEach(([k,v])=>{ if(v) p[k]=v; }); }); }
+function saveAbout(){ store.set('vs.about', JSON.stringify({people:ABOUT.people})); }
+const initials = n => n.split(/\s+/).map(w=>w[0]).slice(0,2).join('').toUpperCase();
+function aboutPanel(){
+  const card = p => {
+    const ed = aboutEdit===p.id, pic = p.photo ? `<img src="${p.photo}" alt="${esc(p.name)}" style="width:7rem;height:7rem;border-radius:50%;object-fit:cover;border:2px solid var(--acc)">` : `<div style="width:7rem;height:7rem;border-radius:50%;background:var(--bg);border:2px solid var(--acc);display:flex;align-items:center;justify-content:center;font-size:2rem;color:var(--acc)">${esc(initials(p.name))}</div>`;
+    return `<div class="hint" style="display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap">${pic}<div style="flex:1;min-width:12rem"><h2 style="margin:0">${esc(p.name)}</h2>
+      ${ed ? `<label>${t('p.role')}</label><input type="text" value="${esc(p.role)}" onchange="aboutSet('${p.id}','role',this.value)">
+        <label>${t('p.tagline')}</label><input type="text" value="${esc(p.tagline)}" onchange="aboutSet('${p.id}','tagline',this.value)">
+        <label>${t('p.bio')}</label><textarea rows="6" style="width:100%;padding:.45rem;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--ink);font:inherit" onchange="aboutSet('${p.id}','bio',this.value)">${esc(p.bio)}</textarea>
+        <label>${t('p.photo')}</label><input type="file" accept="image/*" onchange="aboutPhoto('${p.id}',this.files[0])">
+        ${p.photo?`<button class="btn alt" onclick="aboutSet('${p.id}','photo','');renderPanel()">${t('b.removelogo')}</button>`:''}
+        <button class="btn" onclick="aboutEdit=null;renderPanel()">${t('p.done')}</button>`
+      : `${p.role?`<div style="font-weight:600;color:var(--acc)">${esc(p.role)}</div>`:''}${p.tagline?`<div class="tag" style="margin:.2rem 0">${esc(p.tagline)}</div>`:''}<p style="color:var(--ink);white-space:pre-line">${p.bio?esc(p.bio):`<span style="color:var(--mut)">${t('p.noprofile')}</span>`}</p><button class="btn alt" onclick="aboutEdit='${p.id}';renderPanel()">${t('p.editprofile')}</button>`}</div></div>`;
+  };
+  return `<h2>${esc(ABOUT.org)}</h2><p>${t('p.aboutorg')}</p>${ABOUT.people.map(card).join('')}
+    <div class="hint"><small>${t('p.aboutnote')}</small></div><button class="btn alt" onclick="aboutExport()">${t('p.aboutexport')}</button>`;
+}
+function aboutSet(id,k,v){ const p=ABOUT.people.find(x=>x.id===id); if(!p||!['role','tagline','bio','photo'].includes(k)) return; p[k] = k==='photo' ? sDataImg(v,600000) : sStr(v,k==='bio'?LIMITS.area:k==='tagline'?300:200); saveAbout(); }
+function aboutPhoto(id,f){ safeImageFile(f, 400, url=>{ aboutSet(id,'photo',url); renderPanel(); }, k=>toast(k)); }
+function aboutExport(){
+  const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([JSON.stringify({org:ABOUT.org,people:ABOUT.people},null,2)],{type:'application/json'})); a.download='vastusense-about.json'; a.click();
+}
+
+/* ---------- marma sthan screen ---------- */
+// Items that the source names as harmful on a vital point: pillars, nails, pegs, impure substances, buried objects (verse 58).
+// Mapping marked items to these is my reading: buried or impure (septic, sump, wells, manholes, earth pit) and heavy structure (stairs, shafts, lifts, tanks, pumps).
+const MARMA_ITEMS = ['stp','sump','borewell','well','manhole','earth','stairc','shaft','lift','ohtank','pump'];
+function marmaPanel(){
+  let h=`<h2>${t('s.marma')}</h2><p>${t('p.marmainfo')}</p>
+    <label style="font-weight:400"><input type="checkbox" ${M.show.marma?'checked':''} onchange="M.show.marma=this.checked;M.draw();renderMapTools()"> ${t('p.marmashow')}</label>
+    <div class="hint"><small>${t('p.marmanote')}</small></div><h2 style="margin-top:.8rem">${t('p.marmacheck')}</h2>`;
+  if(!M.closed || !M.frame()) return h + `<div class="hint">${t('p.needplot')}</div>`;
+  const hits=[]; M.feats.filter(f=>MARMA_ITEMS.includes(f.kind)).forEach(f=>{ const m=M.marmaAt(M.featPoint(f)); if(m&&m.inside) hits.push({f,m}); });
+  if(!M.feats.some(f=>MARMA_ITEMS.includes(f.kind))) return h + `<div class="hint">${t('p.marmanofeat')}</div>`;
+  return h + (hits.length ? hits.map(x=>`<div class="hint"><span class="vb v-avoid">${t(x.m.atimarma?'zi.atimarma':'zi.marma')}</span> <b>${t('f.'+x.f.kind)}</b> &middot; ${t('p.sq')} ${x.m.n}</div>`).join('') : `<div class="hint">${t('p.marmanone')}</div>`);
 }
 
 /* ---------- Samarangana Sutradhara diagrams (from the summary's titles and structure only) ---------- */
@@ -862,14 +1144,15 @@ function ssTemples(){
 Object.assign(DIAG,{ssBook, ssMap, ssTown, ssTemples});
 
 /* ---------- start ---------- */
+M.onContext = ctxOpen;
 M.onChange = ()=>{ renderMapTools(); if(cur.sec==='map') renderPanel(); };
 $('langsel').onchange = e => { setLang(e.target.value); refreshAll(); };
 $('themebtn').onclick = () => applyTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
 $('fdown').onclick = () => { fontPct = Math.max(80, fontPct-10); applyFont(); };
 $('fup').onclick = () => { fontPct = Math.min(160, fontPct+10); applyFont(); };
 
-loadBrand();
-setLang(store.get('vs.lang','en'));
-applyTheme(store.get('vs.theme','light')); applyFont();
+loadBrand(); loadAbout();
+setLang(sEnum(store.get('vs.lang','en'), LANGS.map(l=>l[0]), 'en'));
+applyTheme(sEnum(store.get('vs.theme','light'), ['light','dark'], 'light')); applyFont();
 M.init(); refreshAll();
 if('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(()=>{});

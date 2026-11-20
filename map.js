@@ -6,7 +6,11 @@ const M = {
   poly: [], closed: false,
   scalePts: [], pxPerM: 0,
   centre: null,            // manual centre override
-  show: {zones: true, grid: false, labels: true, poly: true, brahma: false, rooms: true, cuts: false, feats: true},
+  show: {zones: true, grid: false, labels: true, poly: true, brahma: false, rooms: true, cuts: false, feats: true, marma: false, annos: true, graha: false},
+  grahaLabels: null,       // {N:'Mercury', ...} translated, set by the app
+  // free drawing and annotations
+  annos: [], annoTool: 'pencil', annoDraft: null, annoSel: -1, annoDrag: null, annoErasing: false, annoUndo: [], annoRedo: [],
+  annoStyle: {stroke:'#d02', fill:'#ffd966', fillMode:'none', w:3, dash:'solid', size:14},
   rooms: [],               // {type, pts:[[x,y],...]}
   roomPts: [], curType: 'living',
   zsys: 16,                // 8 | 16 | 24 | 32 sectors
@@ -18,6 +22,9 @@ const M = {
 M.init = function(){
   M.cv = document.getElementById('map'); M.ctx = M.cv.getContext('2d');
   M.cv.addEventListener('click', M.click);
+  M.cv.addEventListener('pointerdown', M.pdown); M.cv.addEventListener('pointermove', M.pmove);
+  M.cv.addEventListener('pointerup', M.pup); M.cv.addEventListener('pointercancel', M.pup);
+  M.cv.addEventListener('contextmenu', e=>{ e.preventDefault(); M.onContext && M.onContext(e); });
   M.cv.addEventListener('dblclick', e => { if(M.mode==='boundary') M.closePoly(); else if(M.mode==='room') M.closeRoom(); else if(M.mode==='feat' && ['duct','pipe'].includes(M.featKind)) M.finishFeat(); });
   M.draw();
 };
@@ -103,6 +110,112 @@ M.cellOf = function(p){
   return {row,col,id:'ABCDEFGHI'[row]+(col+1),ring:d<=1?0:d<=3?1:2,name:M.devata?M.devata[row*9+col]:''};
 };
 M.devata = null;
+
+/* ---------- marma sthan (Brihat Samhita ch.53 as read: square centres, six lines, nine crossings) ---------- */
+// Squares are numbered down each column from the north-east corner, east column first (page numbering).
+const MARMA_LINES = [[73,9],[81,1],[27,75],[55,7],[3,63],[19,79]];
+M.marmaGeom = function(){
+  const f=M.frame(); if(!f) return null;
+  const [x0,y0,x1,y1]=f.box, cw=(x1-x0)/9, ch=(y1-y0)/9;
+  const ctr=n=>{ const c=Math.floor((n-1)/9), r=(n-1)%9; return [x0+(8-c+.5)*cw, y0+(r+.5)*ch, n]; };
+  const centres=[]; for(let n=1;n<=81;n++) centres.push(ctr(n));
+  const segs=MARMA_LINES.map(l=>[ctr(l[0]),ctr(l[1])]), nodes=[];
+  for(let i=0;i<6;i++)for(let j=i+1;j<6;j++){
+    const [p1,p2]=segs[i],[p3,p4]=segs[j], d=(p1[0]-p2[0])*(p3[1]-p4[1])-(p1[1]-p2[1])*(p3[0]-p4[0]); if(Math.abs(d)<1e-9) continue;
+    const t=((p1[0]-p3[0])*(p3[1]-p4[1])-(p1[1]-p3[1])*(p3[0]-p4[0]))/d, u=((p1[0]-p3[0])*(p1[1]-p2[1])-(p1[1]-p3[1])*(p1[0]-p2[0]))/d;
+    if(t>=-1e-9&&t<=1+1e-9&&u>=-1e-9&&u<=1+1e-9){ const x=p1[0]+t*(p2[0]-p1[0]), y=p1[1]+t*(p2[1]-p1[1]); if(!nodes.some(q=>Math.hypot(q[0]-x,q[1]-y)<1)) nodes.push([x,y]); }
+  }
+  // a marmasthala covers one-eighth of a square (verse 64); drawn as a circle of that area
+  return {c:f.c, box:f.box, cw, ch, centres, segs, nodes, r:Math.sqrt(cw*ch/(8*Math.PI))};
+};
+// Nearest marma point to an image point: {n, atimarma, inside}
+M.marmaAt = function(p){
+  const g=M.marmaGeom(); if(!g||!M.closed) return null;
+  const q=M.rot(p,-M.northDeg), x=q[0]-g.c[0], y=q[1]-g.c[1]; let best=null;
+  g.centres.forEach(c=>{ const d=Math.hypot(c[0]-x,c[1]-y); if(!best||d<best.d) best={n:c[2],d,c}; });
+  if(!best) return null;
+  best.atimarma = g.nodes.some(n=>Math.hypot(n[0]-best.c[0],n[1]-best.c[1])<1);
+  best.inside = best.d<=g.r; best.r=g.r; return best;
+};
+
+/* ---------- drawing and annotation tools ---------- */
+// Annotation: {type, pts:[[x,y],...], stroke, fill, fillMode:'none'|'light'|'solid', w, dash, size, text}
+M.annoPush = function(){ M.annoUndo.push(JSON.stringify(M.annos)); if(M.annoUndo.length>60) M.annoUndo.shift(); M.annoRedo=[]; };
+M.annoUndoDo = function(){ if(!M.annoUndo.length) return; M.annoRedo.push(JSON.stringify(M.annos)); M.annos=JSON.parse(M.annoUndo.pop()); M.annoSel=-1; M.draw(); M.changed(); };
+M.annoRedoDo = function(){ if(!M.annoRedo.length) return; M.annoUndo.push(JSON.stringify(M.annos)); M.annos=JSON.parse(M.annoRedo.pop()); M.annoSel=-1; M.draw(); M.changed(); };
+M.annoClear = function(){ if(!M.annos.length) return; M.annoPush(); M.annos=[]; M.annoSel=-1; M.draw(); M.changed(); };
+M.annoPath = function(a){
+  const p=new Path2D(), A=a.pts[0], B=a.pts[a.pts.length-1];
+  const x0=Math.min(A[0],B[0]), y0=Math.min(A[1],B[1]), w=Math.abs(B[0]-A[0]), h=Math.abs(B[1]-A[1]);
+  switch(a.type){
+    case 'line': p.moveTo(A[0],A[1]); p.lineTo(B[0],B[1]); break;
+    case 'pencil': a.pts.forEach((q,i)=>i?p.lineTo(q[0],q[1]):p.moveTo(q[0],q[1])); break;
+    case 'rect': p.rect(x0,y0,w,h); break;
+    case 'square': { const s=Math.max(w,h), sx=B[0]>=A[0]?A[0]:A[0]-s, sy=B[1]>=A[1]?A[1]:A[1]-s; p.rect(sx,sy,s,s); break; }
+    case 'circle': p.arc(A[0],A[1],Math.hypot(B[0]-A[0],B[1]-A[1]),0,Math.PI*2); break;
+    case 'ellipse': p.ellipse(x0+w/2,y0+h/2,Math.max(w/2,.1),Math.max(h/2,.1),0,0,Math.PI*2); break;
+    case 'tri': p.moveTo(x0+w/2,y0); p.lineTo(x0+w,y0+h); p.lineTo(x0,y0+h); p.closePath(); break;
+    case 'trap': p.moveTo(x0+w*.22,y0); p.lineTo(x0+w*.78,y0); p.lineTo(x0+w,y0+h); p.lineTo(x0,y0+h); p.closePath(); break;
+  }
+  return p;
+};
+M.annoDash = function(a,lw){ const w=Math.max(1,a.w*lw); return a.dash==='dash'?[w*4,w*3]:a.dash==='dot'?[w*.8,w*2.4]:a.dash==='dd'?[w*5,w*2,w*.8,w*2]:[]; };
+M.annoTextBox = function(a,lw){
+  const x=M.ctx, sz=Math.round((a.size||14)*lw); x.save(); x.font=`bold ${sz}px sans-serif`;
+  const lines=String(a.text||'').split('\n'), wd=Math.max(...lines.map(l=>x.measureText(l).width),sz); x.restore();
+  return {x:a.pts[0][0], y:a.pts[0][1]-sz, w:wd, h:sz*1.25*lines.length, sz, lines};
+};
+M.annoDraw = function(x,a,lw,sel){
+  if(a.type==='text'){
+    const b=M.annoTextBox(a,lw); x.save(); x.font=`bold ${b.sz}px sans-serif`; x.textAlign='left'; x.textBaseline='alphabetic';
+    b.lines.forEach((l,i)=>{ const y=a.pts[0][1]+i*b.sz*1.25; x.lineWidth=b.sz/5; x.strokeStyle='#fff'; x.strokeText(l,a.pts[0][0],y); x.fillStyle=a.stroke; x.fillText(l,a.pts[0][0],y); });
+    if(sel){ x.strokeStyle='#0a84ff'; x.setLineDash([lw*4,lw*3]); x.lineWidth=lw*1.5; x.strokeRect(b.x-lw*2,b.y-lw*2,b.w+lw*4,b.h+lw*4); } x.restore(); return;
+  }
+  const p=M.annoPath(a); x.save(); x.lineCap='round'; x.lineJoin='round';
+  if(a.fillMode && a.fillMode!=='none' && !['line','pencil'].includes(a.type)){ x.globalAlpha=a.fillMode==='solid'?1:.3; x.fillStyle=a.fill; x.fill(p); x.globalAlpha=1; }
+  if(sel){ x.strokeStyle='#0a84ff'; x.globalAlpha=.45; x.lineWidth=a.w*lw+lw*5; x.stroke(p); x.globalAlpha=1; }
+  x.strokeStyle=a.stroke; x.lineWidth=Math.max(1,a.w*lw); x.setLineDash(M.annoDash(a,lw)); x.stroke(p); x.restore();
+};
+// Index of the topmost annotation under point p, or -1. Interior counts only when asked (select) or when filled.
+M.annoHit = function(p, interior){
+  const lw=Math.max(1,M.cv.width/700), x=M.ctx;
+  for(let i=M.annos.length-1;i>=0;i--){
+    const a=M.annos[i];
+    if(a.type==='text'){ const b=M.annoTextBox(a,lw); if(p[0]>=b.x-4&&p[0]<=b.x+b.w+4&&p[1]>=b.y-4&&p[1]<=b.y+b.h+4) return i; continue; }
+    const path=M.annoPath(a); x.save(); x.lineWidth=Math.max(a.w*lw,7*lw);
+    const hit = x.isPointInStroke(path,p[0],p[1]) || (!['line','pencil'].includes(a.type) && (interior||(a.fillMode&&a.fillMode!=='none')) && x.isPointInPath(path,p[0],p[1]));
+    x.restore(); if(hit) return i;
+  }
+  return -1;
+};
+M.annoMove = function(a,dx,dy){ a.pts=a.pts.map(q=>[q[0]+dx,q[1]+dy]); };
+M.annoErase = function(p){
+  const i=M.annoHit(p,false); if(i<0) return;
+  if(!M.annoErasing||!M.annoErasePushed){ M.annoPush(); M.annoErasePushed=true; }
+  M.annos.splice(i,1); M.annoSel=-1; M.draw(); M.changed();
+};
+M.pdown = function(e){
+  if(M.mode!=='anno'||e.button>0) return; const p=M.pos(e), tl=M.annoTool, st=M.annoStyle;
+  try{ M.cv.setPointerCapture(e.pointerId); }catch(x){}
+  if(tl==='text'){ const s=prompt(t('p.texthere')); if(s){ M.annoPush(); M.annos.push({type:'text', pts:[p], text:s, stroke:st.stroke, size:st.size}); M.draw(); M.changed(); } return; }
+  if(tl==='erase'){ M.annoErasing=true; M.annoErasePushed=false; M.annoErase(p); return; }
+  if(tl==='select'){ const i=M.annoHit(p,true); M.annoSel=i; M.annoDrag = i>=0 ? {last:p} : null; if(i>=0) M.annoPush(); M.draw(); return; }
+  M.annoDraft={type:tl, pts:[p,p], free:[p], style:Object.assign({},st)}; M.draw();
+};
+M.pmove = function(e){
+  if(M.mode!=='anno') return; const p=M.pos(e);
+  if(M.annoErasing){ M.annoErase(p); return; }
+  if(M.annoDrag && M.annoSel>=0){ M.annoMove(M.annos[M.annoSel], p[0]-M.annoDrag.last[0], p[1]-M.annoDrag.last[1]); M.annoDrag.last=p; M.draw(); return; }
+  if(M.annoDraft){ if(M.annoDraft.type==='pencil') M.annoDraft.free.push(p); M.annoDraft.pts[1]=p; M.draw(); }
+};
+M.pup = function(e){
+  if(M.annoErasing){ M.annoErasing=false; return; }
+  if(M.annoDrag){ M.annoDrag=null; M.changed(); return; }
+  const d=M.annoDraft; if(!d) return; M.annoDraft=null; const a=d.pts[0], b=d.pts[1];
+  if(d.type==='pencil'){ if(d.free.length<2) { M.draw(); return; } M.annoPush(); M.annos.push(Object.assign({type:'pencil', pts:d.free}, d.style)); }
+  else { if(Math.hypot(b[0]-a[0],b[1]-a[1])<3){ M.draw(); return; } M.annoPush(); M.annos.push(Object.assign({type:d.type, pts:[a,b]}, d.style)); }
+  M.draw(); M.changed();
+};
 
 /* ---------- stage 4: shape, cuts, features ---------- */
 // Factual outline measurements of the drawn plot.
@@ -198,7 +311,7 @@ M.roomInfo = function(r){
   return {zone:M.zoneOf(c), cell:M.cellOf(c), m2:M.pxPerM?M.areaOf(r.pts)/M.pxPerM/M.pxPerM:null};
 };
 
-M.click = function(e){
+M.click = function(e){ if(M.mode==='anno') return;
   const p = M.pos(e);
   if(M.mode==='scale'){
     M.scalePts.push(p); if(M.scalePts.length===2){
@@ -225,6 +338,7 @@ M.click = function(e){
       `<b>${z.sector ? t('zi.sector')+' '+z.c : zoneName(z.c)+' ('+z.c+')'}</b> &middot; ${t('zi.bearing')} ${b.toFixed(1)}&deg; &middot; ${t('zi.element')}: ${t('e.'+z.el)}` +
       (z.lord?` &middot; ${t('zi.lord')}: ${t('l.'+z.lord)}`:'') +
       (M.poly.length>2 ? ` &middot; ${t(M.inPoly(p,M.poly)?'zi.in':'zi.out')}`:'') +
+      (()=>{ if(!M.show.marma) return ''; const m=M.marmaAt(p); return (m&&m.inside) ? ` &middot; <b>${t(m.atimarma?'zi.atimarma':'zi.marma')}</b> (${t('p.sq')} ${m.n})` : ''; })() +
       (()=>{ const k=M.cellOf(p); return k ? ` &middot; ${t('zi.cell')} ${k.id} (${t('ring.'+k.ring)})`+(k.name?` &middot; ${esc(k.name)}`:'') : ''; })();
   }
   M.draw(); M.changed();
@@ -261,6 +375,11 @@ M.draw = function(){
       x.font = `bold ${Math.round(W/55)}px sans-serif`; x.textAlign='center'; x.fillStyle='#000c';
       x.fillText((NZ===8||NZ===16) ? z.c : (Math.round(i*WZ*10)/10)+'°', p[0], p[1]);
     }
+    // planets beside the eight main directions (AstroVastu overlay)
+    if(M.show.graha && M.grahaLabels){
+      ['N','NE','E','SE','S','SW','W','NW'].forEach((d,i)=>{ const m=(i*45+M.northDeg)*Math.PI/180, r=(havePoly ? Math.min(W,H)*0.28 : Math.min(W,H)*0.38)*0.72, p=pt(m,r);
+        x.font=`italic bold ${Math.round(W/62)}px sans-serif`; x.textAlign='center'; x.lineWidth=3; x.strokeStyle='#fffc'; x.strokeText(M.grahaLabels[d],p[0],p[1]); x.fillStyle='#5b2a8a'; x.fillText(M.grahaLabels[d],p[0],p[1]); });
+    }
     x.restore();
   }
 
@@ -282,6 +401,18 @@ M.draw = function(){
     x.restore();
   }
 
+  // marma sthan: square centres, six lines, nine crossing points
+  if(M.show.marma){
+    const mg=M.marmaGeom();
+    if(mg && M.closed){
+      x.save(); x.translate(mg.c[0],mg.c[1]); x.rotate(M.northDeg*Math.PI/180);
+      x.fillStyle='#5b2a8a55'; mg.centres.forEach(c=>{ x.beginPath(); x.arc(c[0],c[1],lw*1.6,0,7); x.fill(); });
+      const cols=['#c0392b','#c0392b','#2471a3','#2471a3','#117a65','#117a65']; x.lineWidth=lw*1.8; x.setLineDash([lw*6,lw*4]);
+      mg.segs.forEach((s,i)=>{ x.strokeStyle=cols[i]; x.beginPath(); x.moveTo(s[0][0],s[0][1]); x.lineTo(s[1][0],s[1][1]); x.stroke(); }); x.setLineDash([]);
+      mg.nodes.forEach(n=>{ x.fillStyle='#000'; x.strokeStyle='#fff'; x.lineWidth=lw*1.5; x.beginPath(); x.arc(n[0],n[1],Math.max(mg.r,lw*4),0,7); x.fill(); x.stroke(); });
+      x.restore();
+    }
+  }
   // boundary
   if(M.show.poly && M.poly.length){
     x.strokeStyle='#d02'; x.lineWidth=lw*2.5; x.beginPath();
@@ -324,6 +455,11 @@ M.draw = function(){
     if(M.featPts.length>1){ x.strokeStyle='#06c'; x.lineWidth=lw*2; x.beginPath(); M.featPts.forEach((p,i)=>i?x.lineTo(p[0],p[1]):x.moveTo(p[0],p[1])); x.stroke(); }
     if(M.featPts.length){ x.fillStyle='#06c'; M.featPts.forEach(p=>{x.beginPath();x.arc(p[0],p[1],lw*5,0,7);x.fill();}); }
   }
+  // drawings and text boxes
+  if(M.show.annos){
+    M.annos.forEach((a,i)=>M.annoDraw(x,a,lw,i===M.annoSel&&M.mode==='anno'));
+    if(M.annoDraft){ const d=M.annoDraft; M.annoDraw(x, Object.assign({type:d.type, pts:d.type==='pencil'?d.free:d.pts}, d.style), lw, false); }
+  }
   // prevailing wind arrow (points the way the wind blows)
   if(M.windFrom!==null && M.windFrom!==''){
     const wa=(M.windFrom+180+M.northDeg)*Math.PI/180, wx=70, wy=H-70, L2=45;
@@ -346,5 +482,10 @@ M.draw = function(){
   x.font=`bold ${Math.round(W/40)}px sans-serif`; x.textAlign='center';
   x.fillText('N', ax+Math.sin(na)*(L+16), ay-Math.cos(na)*(L+16)+6);
   // mode hint
+  // watermark on everything drawn on the map (also in saved images and report snapshots)
+  { x.save(); const wm='VASTUSENSE BY ANOOPAM', fs=Math.max(12,Math.round(W/26)); x.font=`bold ${fs}px sans-serif`; x.textAlign='center'; x.fillStyle='#000'; x.globalAlpha=.09;
+    const tw=x.measureText(wm).width, sx=tw+fs*2, sy=fs*5; x.translate(W/2,H/2); x.rotate(-Math.PI/7);
+    for(let yy=-H*1.2, row=0; yy<H*1.2; yy+=sy, row++){ for(let xx=-W*1.2+(row%2?sx/2:0); xx<W*1.2; xx+=sx) x.fillText(wm,xx,yy); }
+    x.restore(); x.save(); const f2=Math.max(10,Math.round(W/60)); x.font=`bold ${f2}px sans-serif`; x.textAlign='right'; x.lineWidth=f2/4; x.strokeStyle='#fff'; x.strokeText(wm,W-8,H-8); x.fillStyle='#222'; x.globalAlpha=.75; x.fillText(wm,W-8,H-8); x.restore(); }
   if(M.mode!=='view' && L['h.'+M.mode]){x.fillStyle='#000a';x.fillRect(0,0,W,Math.round(W/28)+10);x.fillStyle='#fff';x.font=`${Math.round(W/46)}px sans-serif`;x.textAlign='center';x.fillText(t('h.'+M.mode),W/2,Math.round(W/46)+4);}
 };
